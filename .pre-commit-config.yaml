@@ -1,0 +1,127 @@
+# Pre-commit hooks configuration for MicroLib
+# See https://pre-commit.com for more information
+
+repos:
+  # Go-specific hooks
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+        name: Format Go code
+        description: Run gofmt on Go source files
+      - id: go-imports
+        name: Fix Go imports
+        description: Run goimports on Go source files
+      - id: go-vet-mod
+        name: Run go vet
+        description: Run go vet on Go source files
+      - id: go-mod-tidy
+        name: Tidy Go modules
+        description: Run go mod tidy
+      - id: go-unit-tests-mod
+        name: Run Go unit tests
+        description: Run go test on Go source files
+        args: [-short, -race]
+      - id: golangci-lint-mod
+        name: Run golangci-lint
+        description: Run golangci-lint on Go source files
+
+  # General hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+        description: Remove trailing whitespace from files
+      - id: end-of-file-fixer
+        name: Fix end of files
+        description: Ensure files end with a newline
+      - id: check-yaml
+        name: Check YAML syntax
+        description: Check YAML files for syntax errors
+      - id: check-json
+        name: Check JSON syntax
+        description: Check JSON files for syntax errors
+      - id: check-toml
+        name: Check TOML syntax
+        description: Check TOML files for syntax errors
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+        description: Check for merge conflict markers
+      - id: check-added-large-files
+        name: Check for large files
+        description: Prevent large files from being committed
+        args: ['--maxkb=1000']
+      - id: check-case-conflict
+        name: Check for case conflicts
+        description: Check for files with case conflicts
+      - id: check-executables-have-shebangs
+        name: Check executable shebangs
+        description: Ensure executables have shebangs
+      - id: check-shebang-scripts-are-executable
+        name: Check shebang executables
+        description: Ensure shebang scripts are executable
+      - id: mixed-line-ending
+        name: Check line endings
+        description: Check for mixed line endings
+        args: ['--fix=lf']
+
+  # Security scanning
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        name: Detect secrets
+        description: Detect secrets in code
+        args: ['--baseline', '.secrets.baseline']
+        exclude: |
+          (?x)^(
+            .*\.lock$|
+            .*\.sum$|
+            .*\.pb\.go$|
+            .*_test\.go$
+          )$
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint-docker
+        name: Lint Dockerfile
+        description: Lint Dockerfile with hadolint
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.37.0
+    hooks:
+      - id: markdownlint
+        name: Lint Markdown
+        description: Lint Markdown files
+        args: ['--fix']
+        exclude: |
+          (?x)^(
+            CHANGELOG\.md$|
+            \.github/.*\.md$
+          )$
+
+  # Commit message linting
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.0.0
+    hooks:
+      - id: conventional-pre-commit
+        name: Check commit message
+        description: Check commit message follows conventional commits
+        stages: [commit-msg]
+
+# Configuration for specific hooks
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false
