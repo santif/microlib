@@ -136,9 +136,27 @@ func Info(msg string, fields ...Field) {
 	GlobalLogger.Info(msg, fields...)
 }
 
+// InfoContext logs an informational message with context using the global logger
+func InfoContext(ctx context.Context, msg string, fields ...Field) {
+	if ctxLogger, ok := GlobalLogger.(interface{ InfoContext(context.Context, string, ...Field) }); ok {
+		ctxLogger.InfoContext(ctx, msg, fields...)
+	} else {
+		GlobalLogger.Info(msg, fields...)
+	}
+}
+
 // Error logs an error message using the global logger
 func Error(msg string, err error, fields ...Field) {
 	GlobalLogger.Error(msg, err, fields...)
+}
+
+// ErrorContext logs an error message with context using the global logger
+func ErrorContext(ctx context.Context, msg string, err error, fields ...Field) {
+	if ctxLogger, ok := GlobalLogger.(interface{ ErrorContext(context.Context, string, error, ...Field) }); ok {
+		ctxLogger.ErrorContext(ctx, msg, err, fields...)
+	} else {
+		GlobalLogger.Error(msg, err, fields...)
+	}
 }
 
 // Debug logs a debug message using the global logger
@@ -146,9 +164,27 @@ func Debug(msg string, fields ...Field) {
 	GlobalLogger.Debug(msg, fields...)
 }
 
+// DebugContext logs a debug message with context using the global logger
+func DebugContext(ctx context.Context, msg string, fields ...Field) {
+	if ctxLogger, ok := GlobalLogger.(interface{ DebugContext(context.Context, string, ...Field) }); ok {
+		ctxLogger.DebugContext(ctx, msg, fields...)
+	} else {
+		GlobalLogger.Debug(msg, fields...)
+	}
+}
+
 // Warn logs a warning message using the global logger
 func Warn(msg string, fields ...Field) {
 	GlobalLogger.Warn(msg, fields...)
+}
+
+// WarnContext logs a warning message with context using the global logger
+func WarnContext(ctx context.Context, msg string, fields ...Field) {
+	if ctxLogger, ok := GlobalLogger.(interface{ WarnContext(context.Context, string, ...Field) }); ok {
+		ctxLogger.WarnContext(ctx, msg, fields...)
+	} else {
+		GlobalLogger.Warn(msg, fields...)
+	}
 }
 
 // WithContext returns a new logger with context using the global logger
