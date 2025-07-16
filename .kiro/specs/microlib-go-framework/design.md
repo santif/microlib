@@ -18,7 +18,7 @@ MicroLib es un framework opinado para microservicios en Go que proporciona una b
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    MicroLib Framework                        │
+│                    MicroLib Framework                       │
 ├─────────────────────────────────────────────────────────────┤
 │  Service Core  │  Config  │  Observability  │  Security     │
 ├─────────────────────────────────────────────────────────────┤

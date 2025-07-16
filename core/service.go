@@ -30,25 +30,38 @@ type ShutdownHook func(ctx context.Context) error
 
 // Service represents the core service with lifecycle management
 type Service struct {
-	metadata      ServiceMetadata
-	dependencies  []Dependency
-	shutdownHooks []ShutdownHook
-	shutdown      chan os.Signal
-	mu            sync.RWMutex
-	started       bool
+	metadata        ServiceMetadata
+	dependencies    []Dependency
+	shutdownHooks   []ShutdownHook
+	shutdown        chan os.Signal
+	mu              sync.RWMutex
+	started         bool
+	shutdownTimeout time.Duration
 }
+
+// DefaultShutdownTimeout is the default timeout for graceful shutdown
+const DefaultShutdownTimeout = 30 * time.Second
 
 // NewService creates a new service instance with the provided metadata
 func NewService(metadata ServiceMetadata) *Service {
 	metadata.StartTime = time.Now()
 	
 	return &Service{
-		metadata:      metadata,
-		dependencies:  make([]Dependency, 0),
-		shutdownHooks: make([]ShutdownHook, 0),
-		shutdown:      make(chan os.Signal, 1),
-		started:       false,
+		metadata:        metadata,
+		dependencies:    make([]Dependency, 0),
+		shutdownHooks:   make([]ShutdownHook, 0),
+		shutdown:        make(chan os.Signal, 1),
+		started:         false,
+		shutdownTimeout: DefaultShutdownTimeout,
 	}
+}
+
+// WithShutdownTimeout sets the timeout for graceful shutdown
+func (s *Service) WithShutdownTimeout(timeout time.Duration) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.shutdownTimeout = timeout
+	return s
 }
 
 // Metadata returns the service metadata
@@ -149,9 +162,56 @@ func (s *Service) WaitForShutdown() <-chan os.Signal {
 	return s.shutdown
 }
 
+// Trigger sends a shutdown signal programmatically, useful for testing
+// or for controlled shutdown without relying on OS signals
+func (s *Service) Trigger(sig os.Signal) {
+	if sig == nil {
+		sig = syscall.SIGTERM
+	}
+	s.shutdown <- sig
+}
+
 // IsStarted returns whether the service has been started
 func (s *Service) IsStarted() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.started
+}
+
+// Run starts the service and blocks until a shutdown signal is received,
+// then performs graceful shutdown with the configured timeout.
+// This is a convenience method that combines Start, WaitForShutdown, and Shutdown.
+func (s *Service) Run(ctx context.Context) error {
+	// Start the service
+	if err := s.Start(ctx); err != nil {
+		return fmt.Errorf("failed to start service: %w", err)
+	}
+
+	// Wait for shutdown signal
+	sig := <-s.WaitForShutdown()
+
+	// Get the configured shutdown timeout
+	s.mu.RLock()
+	timeout := s.shutdownTimeout
+	s.mu.RUnlock()
+
+	// Log the signal received (in a real implementation, this would use the logger)
+	fmt.Printf("Received signal %v, initiating graceful shutdown with timeout %v\n", sig, timeout)
+
+	// Perform graceful shutdown
+	if err := s.Shutdown(timeout); err != nil {
+		return fmt.Errorf("failed to shutdown service gracefully: %w", err)
+	}
+
+	return nil
+}
+
+// RunWithTimeout starts the service and blocks until a shutdown signal is received,
+// then performs graceful shutdown with the specified timeout.
+// This is a convenience method that combines Start, WaitForShutdown, and Shutdown.
+func (s *Service) RunWithTimeout(ctx context.Context, shutdownTimeout time.Duration) error {
+	// Override the configured shutdown timeout
+	s.WithShutdownTimeout(shutdownTimeout)
+	
+	return s.Run(ctx)
 }
