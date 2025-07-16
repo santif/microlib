@@ -29,6 +29,12 @@ type Manager interface {
 	
 	// StopWatching stops watching for configuration changes
 	StopWatching() error
+	
+	// GetThreadSafeConfig creates a thread-safe configuration wrapper
+	GetThreadSafeConfig(config interface{}) (*Config, error)
+	
+	// RegisterReloadable registers a component that can reload its configuration
+	RegisterReloadable(component Reloadable) error
 }
 
 // ValidationError represents a validation error with detailed information
@@ -46,13 +52,14 @@ func (e *ValidationError) Error() string {
 
 // DefaultManager is the default implementation of the Manager interface
 type DefaultManager struct {
-	sources  []Source
-	validate *validator.Validate
-	mu       sync.RWMutex
-	watchers []func(interface{})
-	ctx      context.Context
-	cancel   context.CancelFunc
-	config   interface{}
+	sources     []Source
+	validate    *validator.Validate
+	mu          sync.RWMutex
+	watchers    []func(interface{})
+	ctx         context.Context
+	cancel      context.CancelFunc
+	config      interface{}
+	reloadables []Reloadable
 }
 
 // ManagerOption is a function that configures a DefaultManager
@@ -340,15 +347,30 @@ func (m *DefaultManager) AddSource(source Source) {
 	m.sources = append(m.sources, source)
 }
 
-// notifyWatchers notifies all registered watchers about configuration changes
+// notifyWatchers notifies all registered watchers and reloadable components about configuration changes
 func (m *DefaultManager) notifyWatchers(config interface{}) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	watchers := make([]func(interface{}), len(m.watchers))
+	copy(watchers, m.watchers)
 	
-	for _, watcher := range m.watchers {
+	reloadables := make([]Reloadable, len(m.reloadables))
+	copy(reloadables, m.reloadables)
+	m.mu.RUnlock()
+	
+	// Notify watchers
+	for _, watcher := range watchers {
 		go func(w func(interface{})) {
 			w(config)
 		}(watcher)
+	}
+	
+	// Notify reloadable components
+	for _, reloadable := range reloadables {
+		go func(r Reloadable) {
+			if err := r.Reload(config); err != nil {
+				fmt.Printf("Error reloading component: %v\n", err)
+			}
+		}(reloadable)
 	}
 }
 
@@ -697,4 +719,31 @@ func setFieldValue(field reflect.Value, value interface{}) error {
 	}
 	
 	return fmt.Errorf("cannot convert %s to %s", valueVal.Type(), field.Type())
+}
+
+// GetThreadSafeConfig creates a thread-safe configuration wrapper
+func (m *DefaultManager) GetThreadSafeConfig(config interface{}) (*Config, error) {
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+
+	// Validate the configuration first
+	if err := m.Validate(config); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	// Create a new thread-safe configuration
+	return NewConfig(config)
+}
+
+// RegisterReloadable registers a component that can reload its configuration
+func (m *DefaultManager) RegisterReloadable(component Reloadable) error {
+	if component == nil {
+		return fmt.Errorf("component cannot be nil")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reloadables = append(m.reloadables, component)
+	return nil
 }

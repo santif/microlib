@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -108,10 +109,12 @@ func TestManagerWatch(t *testing.T) {
 	// Create a manager
 	manager := NewManager()
 
+	// Use a channel to synchronize the test
+	done := make(chan bool, 1)
+	
 	// Register a watcher
-	called := false
 	err := manager.Watch(func(interface{}) {
-		called = true
+		done <- true
 	})
 	if err != nil {
 		t.Fatalf("Failed to register watcher: %v", err)
@@ -121,12 +124,12 @@ func TestManagerWatch(t *testing.T) {
 	config := &TestConfig{}
 	manager.notifyWatchers(config)
 
-	// Wait a bit for the goroutine to execute
-	time.Sleep(10 * time.Millisecond)
-
-	// Check if the watcher was called
-	if !called {
-		t.Error("Watcher was not called")
+	// Wait for the watcher to be called or timeout
+	select {
+	case <-done:
+		// Watcher was called successfully
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Watcher was not called within timeout")
 	}
 }
 
@@ -454,4 +457,129 @@ func checkValue(t *testing.T, data map[string]interface{}, key string, expected 
 
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
+}
+
+// TestManagerThreadSafeConfig tests the GetThreadSafeConfig method
+func TestManagerThreadSafeConfig(t *testing.T) {
+	// Create a manager
+	manager := NewManager()
+
+	// Create a test config
+	config := &TestConfig{}
+	config.Service.Name = "test-service"
+	config.Service.Version = "1.0.0"
+	config.HTTP.Port = 8080
+
+	// Get a thread-safe config
+	safeConfig, err := manager.GetThreadSafeConfig(config)
+	if err != nil {
+		t.Fatalf("Failed to get thread-safe config: %v", err)
+	}
+
+	// Check that the config was stored correctly
+	if safeConfig == nil {
+		t.Fatal("Thread-safe config is nil")
+	}
+
+	// Get the config and check values
+	configData := safeConfig.Get()
+	if configData == nil {
+		t.Fatal("Config data is nil")
+	}
+
+	// Type assertion
+	typedConfig, ok := configData.(*TestConfig)
+	if !ok {
+		t.Fatal("Failed to cast config data to TestConfig")
+	}
+
+	// Check values
+	if typedConfig.Service.Name != "test-service" {
+		t.Errorf("Expected service name to be 'test-service', got '%s'", typedConfig.Service.Name)
+	}
+	if typedConfig.Service.Version != "1.0.0" {
+		t.Errorf("Expected service version to be '1.0.0', got '%s'", typedConfig.Service.Version)
+	}
+	if typedConfig.HTTP.Port != 8080 {
+		t.Errorf("Expected HTTP port to be 8080, got %d", typedConfig.HTTP.Port)
+	}
+}
+
+// TestManagerRegisterReloadable tests the RegisterReloadable method
+func TestManagerRegisterReloadable(t *testing.T) {
+	// Create a manager
+	manager := NewManager()
+
+	// Create a reloadable component
+	component := &TestReloadableComponent{
+		done: make(chan bool, 1),
+	}
+
+	// Register the component
+	err := manager.RegisterReloadable(component)
+	if err != nil {
+		t.Fatalf("Failed to register reloadable component: %v", err)
+	}
+
+	// Create a test config
+	config := &TestConfig{}
+	config.Service.Name = "test-service"
+	config.Service.Version = "1.0.0"
+	config.HTTP.Port = 8080
+
+	// Notify watchers (which should call Reload on the component)
+	manager.notifyWatchers(config)
+
+	// Wait for the component to be reloaded or timeout
+	select {
+	case <-component.done:
+		// Component was reloaded successfully
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Component was not reloaded within timeout")
+	}
+
+	// Check the reloaded config
+	component.mu.RLock()
+	lastConfig := component.lastConfig
+	component.mu.RUnlock()
+
+	if lastConfig == nil {
+		t.Fatal("Reloaded config is nil")
+	}
+
+	// Type assertion
+	typedConfig, ok := lastConfig.(*TestConfig)
+	if !ok {
+		t.Fatal("Failed to cast reloaded config to TestConfig")
+	}
+
+	// Check values
+	if typedConfig.Service.Name != "test-service" {
+		t.Errorf("Expected service name to be 'test-service', got '%s'", typedConfig.Service.Name)
+	}
+}
+
+// TestReloadableComponent is a test component that implements Reloadable
+type TestReloadableComponent struct {
+	mu         sync.RWMutex
+	reloaded   bool
+	lastConfig interface{}
+	done       chan bool
+}
+
+// Reload implements the Reloadable interface
+func (c *TestReloadableComponent) Reload(newConfig interface{}) error {
+	c.mu.Lock()
+	c.reloaded = true
+	c.lastConfig = newConfig
+	c.mu.Unlock()
+	
+	// Signal that reload is complete
+	select {
+	case c.done <- true:
+	default:
+		// Channel is full, ignore
+	}
+	
+	return nil
 }
