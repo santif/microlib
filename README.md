@@ -1,37 +1,37 @@
 # MicroLib - Go Microservices Framework
 
-MicroLib es una librería de microservicios para Go diseñada para estandarizar y simplificar el desarrollo de microservicios productivos. Proporciona un framework cohesivo y unificado que reduce el time-to-market y asegura la implementación de las mejores prácticas de arquitectura desde el inicio.
+MicroLib is a Go microservices library designed to standardize and simplify the development of production-ready services. It provides a cohesive and unified framework that reduces time-to-market and ensures best architecture practices from day one.
 
 ## 🚀 Features
 
-- **Service Core**: Gestión completa del ciclo de vida del servicio con graceful shutdown
-- **Configuration**: Sistema de configuración jerárquico con validación automática
-- **Observability**: Logging estructurado, métricas Prometheus y tracing OpenTelemetry integrados
-- **HTTP/gRPC**: Servidores con middleware stack predefinido y soporte OpenAPI
-- **Messaging**: Comunicación asincrónica con patrón Outbox transparente
-- **Data Layer**: Abstracciones para SQL y cache con implementaciones optimizadas
-- **Jobs & Scheduling**: Sistema de jobs distribuidos con elección de líder
-- **Security**: Autenticación JWT y hooks de autorización integrados
-- **CLI Tools**: Herramientas de scaffolding para desarrollo rápido
+* **Service Core**: Full lifecycle management with graceful shutdown
+* **Configuration**: Hierarchical config system with automatic validation
+* **Observability**: Integrated structured logging, Prometheus metrics, and OpenTelemetry tracing
+* **HTTP/gRPC**: Servers with a predefined middleware stack and OpenAPI support
+* **Messaging**: Asynchronous communication with transparent Outbox pattern
+* **Data Layer**: Abstractions for SQL and cache with optimized implementations
+* **Jobs & Scheduling**: Distributed job system with leader election
+* **Security**: Built-in JWT authentication and authorization hooks
+* **CLI Tools**: Scaffolding tools for rapid development
 
 ## 📋 Requirements
 
-- Go 1.22 or higher
-- PostgreSQL (for data persistence and Outbox pattern)
-- Redis (for caching and job queues)
+* Go 1.22 or higher
+* PostgreSQL (for persistence and Outbox pattern)
+* Redis (for caching and job queues)
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
+┌────────────────────────────────────────────────────────────-─┐
 │                    MicroLib Framework                        │
-├─────────────────────────────────────────────────────────────┤
-│  Service Core  │  Config  │  Observability  │  Security     │
-├─────────────────────────────────────────────────────────────┤
-│  HTTP/gRPC     │  Messaging      │  Data Layer              │
-├─────────────────────────────────────────────────────────────┤
-│  Jobs/Scheduler│  CLI Tools      │  Extensions              │
-└─────────────────────────────────────────────────────────────┘
+├─────────────────────────────────────────────────────────────-┤
+│  Service Core  │  Configuration  │  Observability  │ Security │
+├─────────────────────────────────────────────────────────────-┤
+│  HTTP/gRPC     │  Messaging      │  Data Layer               │
+├────────────────────────────────────────────────────────────-─┤
+│  Jobs/Scheduler│  CLI Tools      │  Extensions               │
+└────────────────────────────────────────────────────────────-─┘
 ```
 
 ## 🚀 Quick Start
@@ -249,10 +249,10 @@ make build
 
 Check the `examples/` directory for complete service implementations:
 
-- **REST API Service**: Complete HTTP service with authentication
-- **gRPC Service**: gRPC service with interceptors
-- **Event-Driven Service**: Service using messaging and Outbox pattern
-- **Job Processing Service**: Background job processing
+* **REST API Service**: Full HTTP service with authentication
+* **gRPC Service**: gRPC service with interceptors
+* **Event-Driven Service**: Messaging-based service with Outbox
+* **Job Processing Service**: Background job processor
 
 ## 🤝 Contributing
 
@@ -264,11 +264,11 @@ Check the `examples/` directory for complete service implementations:
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
 
 ## 🆘 Support
 
-- 📖 [Documentation](https://microlib.dev/docs)
-- 💬 [Discord Community](https://discord.gg/microlib)
-- 🐛 [Issue Tracker](https://github.com/santif/microlib/issues)
-- 📧 [Email Support](mailto:support@microlib.dev)
+* 📖 [Documentation](https://microlib.dev/docs)
+* 💬 [Discord Community](https://discord.gg/microlib)
+* 🐛 [Issue Tracker](https://github.com/santif/microlib/issues)
+* 📧 [Email Support](mailto:support@microlib.dev)
