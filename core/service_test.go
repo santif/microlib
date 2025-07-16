@@ -200,6 +200,10 @@ func TestServiceStart_WithFailingDependency(t *testing.T) {
 	if service.IsStarted() {
 		t.Error("Service should not be started when dependency validation fails")
 	}
+	
+	if service.IsReadyToServe() {
+		t.Error("Service should not be ready to serve when dependency validation fails")
+	}
 }
 
 func TestShutdownHooks(t *testing.T) {
@@ -579,6 +583,109 @@ func TestServiceRun_StartFailure(t *testing.T) {
 	}
 }
 
+func TestStartupHooks(t *testing.T) {
+	service := NewService(ServiceMetadata{
+		Name:      "test-service",
+		Version:   "1.0.0",
+		Instance:  "test-instance-1",
+		BuildHash: "abc123",
+	})
+
+	var hooksCalled []string
+	
+	// Register startup hooks
+	service.RegisterStartupHook(func(ctx context.Context) error {
+		hooksCalled = append(hooksCalled, "hook1")
+		return nil
+	})
+	
+	service.RegisterStartupHook(func(ctx context.Context) error {
+		hooksCalled = append(hooksCalled, "hook2")
+		return nil
+	})
+
+	// Start service
+	ctx := context.Background()
+	err := service.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start service: %v", err)
+	}
+
+	// Verify hooks were called in order (FIFO)
+	expectedOrder := []string{"hook1", "hook2"}
+	if len(hooksCalled) != len(expectedOrder) {
+		t.Errorf("Expected %d hooks called, got %d", len(expectedOrder), len(hooksCalled))
+	}
+
+	for i, expected := range expectedOrder {
+		if i >= len(hooksCalled) || hooksCalled[i] != expected {
+			t.Errorf("Expected hook %s at position %d, got %s", expected, i, hooksCalled[i])
+		}
+	}
+
+	if !service.IsStarted() {
+		t.Error("Service should be started after successful startup hooks")
+	}
+	
+	if !service.IsReadyToServe() {
+		t.Error("Service should be ready to serve after successful startup hooks")
+	}
+}
+
+func TestStartupHooks_WithError(t *testing.T) {
+	service := NewService(ServiceMetadata{
+		Name:      "test-service",
+		Version:   "1.0.0",
+		Instance:  "test-instance-1",
+		BuildHash: "abc123",
+	})
+
+	var hooksCalled []string
+	
+	// Register startup hooks, with the second one failing
+	service.RegisterStartupHook(func(ctx context.Context) error {
+		hooksCalled = append(hooksCalled, "hook1")
+		return nil
+	})
+	
+	service.RegisterStartupHook(func(ctx context.Context) error {
+		hooksCalled = append(hooksCalled, "hook2-error")
+		return errors.New("startup hook failed")
+	})
+	
+	service.RegisterStartupHook(func(ctx context.Context) error {
+		hooksCalled = append(hooksCalled, "hook3")
+		return nil
+	})
+
+	// Start service - should fail
+	ctx := context.Background()
+	err := service.Start(ctx)
+	if err == nil {
+		t.Error("Expected error when startup hook fails")
+	}
+
+	// Verify only hooks before the failing one were called
+	expectedOrder := []string{"hook1", "hook2-error"}
+	if len(hooksCalled) != len(expectedOrder) {
+		t.Errorf("Expected %d hooks called, got %d", len(expectedOrder), len(hooksCalled))
+	}
+
+	for i, expected := range expectedOrder {
+		if i >= len(hooksCalled) || hooksCalled[i] != expected {
+			t.Errorf("Expected hook %s at position %d, got %s", expected, i, hooksCalled[i])
+		}
+	}
+
+	if service.IsStarted() {
+		t.Error("Service should not be started when startup hook fails")
+	}
+	
+	if service.IsReadyToServe() {
+		t.Error("Service should not be ready to serve when startup hook fails")
+	}
+}
+
 func TestSignalHandling_SIGTERM(t *testing.T) {
 	service := NewService(ServiceMetadata{
 		Name:      "test-service",
@@ -896,6 +1003,145 @@ func TestRunWithTimeout(t *testing.T) {
 	// Verify shutdown hook was called
 	if !hookCalled {
 		t.Error("Shutdown hook should have been called")
+	}
+}
+
+func TestHealthChecker(t *testing.T) {
+	service := NewService(ServiceMetadata{
+		Name:      "test-service",
+		Version:   "1.0.0",
+		Instance:  "test-instance-1",
+		BuildHash: "abc123",
+	})
+
+	// Get health checker
+	healthChecker := service.HealthChecker()
+	if healthChecker == nil {
+		t.Fatal("HealthChecker should not be nil")
+	}
+
+	// Add custom health check
+	healthChecker.AddCheck("custom-check", func(ctx context.Context) error {
+		return nil
+	})
+
+	// Run health checks
+	ctx := context.Background()
+	results := service.CheckHealth(ctx)
+	
+	// Verify custom check was included
+	if _, ok := results["custom-check"]; !ok {
+		t.Error("Custom health check should be included in results")
+	}
+	
+	// Verify service is healthy
+	if !service.IsHealthy(ctx) {
+		t.Error("Service should be healthy with passing checks")
+	}
+	
+	// Add failing health check
+	healthChecker.AddCheck("failing-check", func(ctx context.Context) error {
+		return errors.New("check failed")
+	})
+	
+	// Verify service is now unhealthy
+	if service.IsHealthy(ctx) {
+		t.Error("Service should be unhealthy with failing check")
+	}
+	
+	// Get health summary
+	summary := service.HealthSummary(ctx)
+	if summary.Status != StatusDown {
+		t.Errorf("Expected status %s, got %s", StatusDown, summary.Status)
+	}
+	
+	// Remove failing check
+	healthChecker.RemoveCheck("failing-check")
+	
+	// Verify service is healthy again
+	if !service.IsHealthy(ctx) {
+		t.Error("Service should be healthy after removing failing check")
+	}
+}
+
+func TestReadyToServe(t *testing.T) {
+	service := NewService(ServiceMetadata{
+		Name:      "test-service",
+		Version:   "1.0.0",
+		Instance:  "test-instance-1",
+		BuildHash: "abc123",
+	})
+	
+	// Service should not be ready initially
+	if service.IsReadyToServe() {
+		t.Error("Service should not be ready to serve initially")
+	}
+	
+	// Start service
+	ctx := context.Background()
+	err := service.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start service: %v", err)
+	}
+	
+	// Service should be ready after start
+	if !service.IsReadyToServe() {
+		t.Error("Service should be ready to serve after start")
+	}
+	
+	// Manually set not ready
+	service.SetReadyToServe(false)
+	
+	// Service should not be ready
+	if service.IsReadyToServe() {
+		t.Error("Service should not be ready after SetReadyToServe(false)")
+	}
+	
+	// Manually set ready
+	service.SetReadyToServe(true)
+	
+	// Service should be ready
+	if !service.IsReadyToServe() {
+		t.Error("Service should be ready after SetReadyToServe(true)")
+	}
+}
+
+func TestDependencyRegistration(t *testing.T) {
+	service := NewService(ServiceMetadata{
+		Name:      "test-service",
+		Version:   "1.0.0",
+		Instance:  "test-instance-1",
+		BuildHash: "abc123",
+	})
+	
+	// Add dependency
+	dep := &mockDependency{name: "test-dep"}
+	service.AddDependency(dep)
+	
+	// Check that dependency health check was registered
+	ctx := context.Background()
+	results := service.CheckHealth(ctx)
+	
+	if _, ok := results["test-dep"]; !ok {
+		t.Error("Dependency health check should be registered automatically")
+	}
+	
+	// Add failing dependency
+	failingDep := &mockDependency{
+		name:        "failing-dep",
+		healthError: errors.New("connection failed"),
+	}
+	service.AddDependency(failingDep)
+	
+	// Check that failing dependency was registered
+	results = service.CheckHealth(ctx)
+	if _, ok := results["failing-dep"]; !ok {
+		t.Error("Failing dependency health check should be registered")
+	}
+	
+	// Verify service is unhealthy
+	if service.IsHealthy(ctx) {
+		t.Error("Service should be unhealthy with failing dependency")
 	}
 }
 

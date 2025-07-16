@@ -70,12 +70,12 @@ jobs:
           
           ### Using Go install
           ```bash
-          go install github.com/microlib/microlib/cmd/microlib@${{ github.ref_name }}
+          go install github.com/santif/microlib/cmd/microlib@${{ github.ref_name }}
           ```
           
           ### Using curl (Linux/macOS)
           ```bash
-          curl -L https://github.com/microlib/microlib/releases/download/${{ github.ref_name }}/microlib-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m) -o microlib
+          curl -L https://github.com/santif/microlib/releases/download/${{ github.ref_name }}/microlib-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m) -o microlib
           chmod +x microlib
           ```
         files: |

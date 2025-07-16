@@ -28,15 +28,21 @@ type Dependency interface {
 // ShutdownHook is a function that gets called during graceful shutdown
 type ShutdownHook func(ctx context.Context) error
 
+// StartupHook is a function that gets called during service startup
+type StartupHook func(ctx context.Context) error
+
 // Service represents the core service with lifecycle management
 type Service struct {
 	metadata        ServiceMetadata
 	dependencies    []Dependency
 	shutdownHooks   []ShutdownHook
+	startupHooks    []StartupHook
+	healthChecker   *HealthChecker
 	shutdown        chan os.Signal
 	mu              sync.RWMutex
 	started         bool
 	shutdownTimeout time.Duration
+	readyToServe    bool
 }
 
 // DefaultShutdownTimeout is the default timeout for graceful shutdown
@@ -50,9 +56,12 @@ func NewService(metadata ServiceMetadata) *Service {
 		metadata:        metadata,
 		dependencies:    make([]Dependency, 0),
 		shutdownHooks:   make([]ShutdownHook, 0),
+		startupHooks:    make([]StartupHook, 0),
+		healthChecker:   NewHealthChecker(),
 		shutdown:        make(chan os.Signal, 1),
 		started:         false,
 		shutdownTimeout: DefaultShutdownTimeout,
+		readyToServe:    false,
 	}
 }
 
@@ -76,6 +85,9 @@ func (s *Service) AddDependency(dep Dependency) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dependencies = append(s.dependencies, dep)
+	
+	// Register the dependency's health check with the health checker
+	s.healthChecker.AddCheck(dep.Name(), dep.HealthCheck)
 }
 
 // RegisterShutdownHook registers a function to be called during graceful shutdown
@@ -85,19 +97,60 @@ func (s *Service) RegisterShutdownHook(hook ShutdownHook) {
 	s.shutdownHooks = append(s.shutdownHooks, hook)
 }
 
+// RegisterStartupHook registers a function to be called during service startup
+func (s *Service) RegisterStartupHook(hook StartupHook) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.startupHooks = append(s.startupHooks, hook)
+}
+
+// HealthChecker returns the service's health checker
+func (s *Service) HealthChecker() *HealthChecker {
+	return s.healthChecker
+}
+
+// IsReadyToServe returns whether the service is ready to serve traffic
+func (s *Service) IsReadyToServe() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.readyToServe
+}
+
 // ValidateDependencies checks all registered dependencies before accepting traffic
 func (s *Service) ValidateDependencies(ctx context.Context) error {
-	s.mu.RLock()
-	dependencies := make([]Dependency, len(s.dependencies))
-	copy(dependencies, s.dependencies)
-	s.mu.RUnlock()
-
-	for _, dep := range dependencies {
-		if err := dep.HealthCheck(ctx); err != nil {
-			return fmt.Errorf("dependency %s health check failed: %w", dep.Name(), err)
+	// Use the health checker to run all health checks
+	results := s.healthChecker.RunChecks(ctx)
+	
+	// Check if any dependency failed
+	for name, result := range results {
+		if result.Status != StatusUp {
+			return fmt.Errorf("dependency %s health check failed: %s", name, result.Error)
 		}
 	}
+	
 	return nil
+}
+
+// CheckHealth runs all health checks and returns the results
+func (s *Service) CheckHealth(ctx context.Context) map[string]HealthResult {
+	return s.healthChecker.RunChecks(ctx)
+}
+
+// IsHealthy returns true if all health checks pass
+func (s *Service) IsHealthy(ctx context.Context) bool {
+	return s.healthChecker.IsHealthy(ctx)
+}
+
+// HealthSummary provides a summary of all health checks
+func (s *Service) HealthSummary(ctx context.Context) HealthResult {
+	return s.healthChecker.HealthSummary(ctx)
+}
+
+// SetReadyToServe sets whether the service is ready to serve traffic
+func (s *Service) SetReadyToServe(ready bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.readyToServe = ready
 }
 
 // Start initializes the service and validates dependencies
@@ -114,9 +167,22 @@ func (s *Service) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to validate dependencies: %w", err)
 	}
 
-	// Only mark as started after successful validation
+	// Execute startup hooks
+	s.mu.RLock()
+	hooks := make([]StartupHook, len(s.startupHooks))
+	copy(hooks, s.startupHooks)
+	s.mu.RUnlock()
+
+	for _, hook := range hooks {
+		if err := hook(ctx); err != nil {
+			return fmt.Errorf("startup hook failed: %w", err)
+		}
+	}
+
+	// Only mark as started after successful validation and startup hooks
 	s.mu.Lock()
 	s.started = true
+	s.readyToServe = true
 	s.mu.Unlock()
 
 	// Set up signal handling for graceful shutdown

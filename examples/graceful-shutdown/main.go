@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"syscall"
 	"time"
 
-	"github.com/microlib/microlib/core"
+	"github.com/santif/microlib/core"
 )
 
 // Example dependency that simulates a database connection
@@ -121,21 +122,43 @@ func main() {
 		return nil
 	})
 
-	fmt.Println("✓ All dependencies validated and service ready")
-	fmt.Println("📡 Service is now accepting traffic")
+	// Register startup hooks
+	service.RegisterStartupHook(func(ctx context.Context) error {
+		fmt.Println("🔍 Performing startup validation...")
+		time.Sleep(100 * time.Millisecond) // Simulate startup work
+		fmt.Println("✓ Startup validation completed")
+		return nil
+	})
+	
+	// Add a custom health check
+	service.HealthChecker().AddCheck("memory", func(ctx context.Context) error {
+		// Simulate memory check
+		fmt.Println("🧠 Checking memory usage...")
+		return nil // Memory usage is OK
+	})
 	
 	// Configure the service with a 10-second shutdown timeout
 	service.WithShutdownTimeout(10 * time.Second)
 	
-	// If we're in test mode, start the service in a goroutine and trigger shutdown after a delay
+	// If we're in test mode, handle differently
 	if testMode {
 		fmt.Println("🧪 Running in test mode - will automatically shutdown after 1 second")
 		
+		// Start the service (this will validate dependencies and run startup hooks)
 		ctx := context.Background()
-		// Start the service
-		if err := service.Start(ctx); err != nil {
+		err := service.Start(ctx)
+		if err != nil {
 			log.Fatalf("❌ Service failed to start: %v", err)
 		}
+		
+		// Print health check results
+		healthResults := service.CheckHealth(ctx)
+		resultsJSON, _ := json.MarshalIndent(healthResults, "", "  ")
+		fmt.Println("🏥 Health check results:")
+		fmt.Println(string(resultsJSON))
+		
+		fmt.Println("✓ All dependencies validated and service ready")
+		fmt.Println("📡 Service is now accepting traffic")
 		
 		// Wait a bit to simulate running
 		time.Sleep(1 * time.Second)

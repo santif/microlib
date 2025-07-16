@@ -54,7 +54,7 @@ linters-settings:
 
   # Dot imports
   goimports:
-    local-prefixes: github.com/microlib/microlib
+    local-prefixes: github.com/santif/microlib
 
   # Line length
   lll:

@@ -39,7 +39,7 @@ MicroLib es una librería de microservicios para Go diseñada para estandarizar 
 ### 1. Install MicroLib CLI
 
 ```bash
-go install github.com/microlib/microlib/cli/microlib-cli@latest
+go install github.com/santif/microlib/cli/microlib-cli@latest
 ```
 
 ### 2. Create a New Service
@@ -58,9 +58,9 @@ import (
     "context"
     "log"
     
-    "github.com/microlib/microlib/core"
-    "github.com/microlib/microlib/config"
-    "github.com/microlib/microlib/http"
+    "github.com/santif/microlib/core"
+    "github.com/santif/microlib/config"
+    "github.com/santif/microlib/http"
 )
 
 func main() {
@@ -138,7 +138,7 @@ logging:
 ### Logging
 
 ```go
-import "github.com/microlib/microlib/observability"
+import "github.com/santif/microlib/observability"
 
 logger := observability.NewLogger()
 logger.Info("Service started", 
@@ -169,7 +169,7 @@ health.AddCheck("database", func(ctx context.Context) error {
 ### JWT Authentication
 
 ```go
-import "github.com/microlib/microlib/security"
+import "github.com/santif/microlib/security"
 
 auth := security.NewJWTAuthenticator(security.JWTConfig{
     JWKSEndpoint: "https://auth.example.com/.well-known/jwks.json",
@@ -184,7 +184,7 @@ httpServer.RegisterMiddleware(auth.Middleware())
 ### Outbox Pattern
 
 ```go
-import "github.com/microlib/microlib/messaging"
+import "github.com/santif/microlib/messaging"
 
 broker := messaging.NewBroker(cfg.Messaging)
 
@@ -207,7 +207,7 @@ err := db.Transaction(ctx, func(tx data.Transaction) error {
 ## 🔄 Jobs & Scheduling
 
 ```go
-import "github.com/microlib/microlib/jobs"
+import "github.com/santif/microlib/jobs"
 
 scheduler := jobs.NewScheduler()
 
@@ -270,5 +270,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - 📖 [Documentation](https://microlib.dev/docs)
 - 💬 [Discord Community](https://discord.gg/microlib)
-- 🐛 [Issue Tracker](https://github.com/microlib/microlib/issues)
+- 🐛 [Issue Tracker](https://github.com/santif/microlib/issues)
 - 📧 [Email Support](mailto:support@microlib.dev)
