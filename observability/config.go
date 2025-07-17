@@ -13,8 +13,8 @@ type ObservabilityConfig struct {
 	// Logging contains configuration for the logger
 	Logging LoggerConfig `json:"logging" yaml:"logging" validate:"required"`
 	
-	// Metrics contains configuration for metrics (will be implemented in a future task)
-	// Metrics MetricsConfig `json:"metrics" yaml:"metrics"`
+	// Metrics contains configuration for metrics
+	Metrics MetricsConfig `json:"metrics" yaml:"metrics" validate:"required"`
 	
 	// Tracing contains configuration for tracing (will be implemented in a future task)
 	// Tracing TracingConfig `json:"tracing" yaml:"tracing"`
@@ -24,6 +24,7 @@ type ObservabilityConfig struct {
 func DefaultObservabilityConfig() ObservabilityConfig {
 	return ObservabilityConfig{
 		Logging: DefaultLoggerConfig(),
+		Metrics: DefaultMetricsConfig(),
 	}
 }
 
