@@ -18,6 +18,9 @@ type ObservabilityConfig struct {
 
 	// Tracing contains configuration for tracing
 	Tracing TracingConfig `json:"tracing" yaml:"tracing" validate:"required"`
+
+	// Health contains configuration for health checks
+	Health HealthConfig `json:"health" yaml:"health" validate:"required"`
 }
 
 // DefaultObservabilityConfig returns the default observability configuration
@@ -26,6 +29,7 @@ func DefaultObservabilityConfig() ObservabilityConfig {
 		Logging: DefaultLoggerConfig(),
 		Metrics: DefaultMetricsConfig(),
 		Tracing: DefaultTracingConfig(),
+		Health:  DefaultHealthConfig(),
 	}
 }
 
