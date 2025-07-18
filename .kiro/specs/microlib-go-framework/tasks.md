@@ -115,7 +115,7 @@
   - Create CORS and security headers middleware
   - _Requirements: 5.1, 5.4_
 
-- [ ] 16. Implement OpenAPI integration
+- [x] 16. Implement OpenAPI integration
   - Add TypeSpec/OpenAPI specification serving at /openapi.json
   - Create middleware for API documentation generation
   - Implement request/response validation against OpenAPI spec

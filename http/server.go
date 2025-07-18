@@ -103,6 +103,23 @@ func (s *server) registerDefaultMiddleware() {
 		s.RegisterMiddleware(CORSMiddleware(s.config.CORS))
 	}
 
+	// Add OpenAPI validation if enabled
+	if s.config.OpenAPI != nil && s.config.OpenAPI.Enabled &&
+		(s.config.OpenAPI.ValidateRequests || s.config.OpenAPI.ValidateResponses) {
+		// OpenAPI spec will be loaded when a spec path is provided
+		if s.config.OpenAPI.SpecPath != "" && s.deps.Logger != nil {
+			if spec, err := NewOpenAPISpec(s.config.OpenAPI.SpecPath, s.deps.Logger); err == nil {
+				s.RegisterMiddleware(OpenAPIMiddleware(spec, *s.config.OpenAPI))
+
+				// Register OpenAPI handlers
+				RegisterOpenAPIHandlers(s, *s.config.OpenAPI, spec, s.deps.Logger)
+			} else if s.deps.Logger != nil {
+				s.deps.Logger.Error("Failed to load OpenAPI specification", err,
+					observability.NewField("path", s.config.OpenAPI.SpecPath))
+			}
+		}
+	}
+
 	// Add tracing if available
 	if s.deps.Tracer != nil {
 		s.RegisterMiddleware(TracingMiddleware(s.deps.Tracer))

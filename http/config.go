@@ -47,10 +47,14 @@ type ServerConfig struct {
 
 	// HealthPaths are paths that should bypass certain middleware (like authentication)
 	HealthPaths []string `json:"health_paths" yaml:"health_paths"`
+
+	// OpenAPI contains OpenAPI configuration
+	OpenAPI *OpenAPIConfig `json:"openapi" yaml:"openapi"`
 }
 
 // DefaultServerConfig returns the default server configuration
 func DefaultServerConfig() ServerConfig {
+	openAPIConfig := DefaultOpenAPIConfig()
 	return ServerConfig{
 		Host:            "0.0.0.0",
 		Port:            8080,
@@ -64,6 +68,7 @@ func DefaultServerConfig() ServerConfig {
 		CORS:            DefaultCORSConfig(),
 		SecurityHeaders: DefaultSecurityHeadersConfig(),
 		HealthPaths:     []string{"/health", "/metrics"},
+		OpenAPI:         &openAPIConfig,
 	}
 }
 
