@@ -8,6 +8,8 @@ import (
 	"path"
 	"sync"
 	"time"
+
+	"github.com/santif/microlib/observability"
 )
 
 // Common errors
@@ -35,6 +37,21 @@ type Server interface {
 
 	// IsStarted returns whether the server is started
 	IsStarted() bool
+
+	// Config returns the server configuration
+	Config() ServerConfig
+}
+
+// ServerDependencies contains the dependencies for the HTTP server
+type ServerDependencies struct {
+	// Logger is the logger to use for the server
+	Logger observability.Logger
+
+	// Metrics is the metrics collector to use for the server
+	Metrics observability.Metrics
+
+	// Tracer is the tracer to use for the server
+	Tracer observability.Tracer
 }
 
 // server implements the Server interface
@@ -46,22 +63,59 @@ type server struct {
 	started     bool
 	startedMu   sync.RWMutex
 	shutdownErr error
+	deps        ServerDependencies
 }
 
 // NewServer creates a new HTTP server with the default configuration
-func NewServer() Server {
-	return NewServerWithConfig(DefaultServerConfig())
+func NewServer(deps ServerDependencies) Server {
+	return NewServerWithConfig(DefaultServerConfig(), deps)
 }
 
 // NewServerWithConfig creates a new HTTP server with the provided configuration
-func NewServerWithConfig(config ServerConfig) Server {
+func NewServerWithConfig(config ServerConfig, deps ServerDependencies) Server {
 	mux := http.NewServeMux()
-
-	return &server{
+	s := &server{
 		config:     config,
 		mux:        mux,
 		middleware: make(MiddlewareChain, 0),
 		started:    false,
+		deps:       deps,
+	}
+
+	// Register default middleware based on configuration
+	s.registerDefaultMiddleware()
+
+	return s
+}
+
+// registerDefaultMiddleware registers the default middleware stack based on the configuration
+func (s *server) registerDefaultMiddleware() {
+	// Recovery middleware should always be first to catch panics in other middleware
+	s.RegisterMiddleware(RecoveryMiddleware(s.deps.Logger))
+
+	// Add security headers if enabled
+	if s.config.SecurityHeaders.Enabled {
+		s.RegisterMiddleware(SecurityHeadersMiddleware(s.config.SecurityHeaders))
+	}
+
+	// Add CORS if enabled
+	if s.config.CORS.Enabled {
+		s.RegisterMiddleware(CORSMiddleware(s.config.CORS))
+	}
+
+	// Add tracing if available
+	if s.deps.Tracer != nil {
+		s.RegisterMiddleware(TracingMiddleware(s.deps.Tracer))
+	}
+
+	// Add metrics if available
+	if s.deps.Metrics != nil {
+		s.RegisterMiddleware(MetricsMiddleware(s.deps.Metrics))
+	}
+
+	// Add logging if available
+	if s.deps.Logger != nil {
+		s.RegisterMiddleware(LoggingMiddleware(s.deps.Logger))
 	}
 }
 
@@ -106,6 +160,14 @@ func (s *server) Start(ctx context.Context) error {
 		MaxHeaderBytes: s.config.MaxHeaderBytes,
 	}
 
+	// Log server startup
+	if s.deps.Logger != nil {
+		s.deps.Logger.Info("Starting HTTP server",
+			observability.NewField("address", addr),
+			observability.NewField("tls_enabled", s.config.EnableTLS),
+		)
+	}
+
 	// Start the server in a goroutine
 	go func() {
 		var err error
@@ -120,6 +182,9 @@ func (s *server) Start(ctx context.Context) error {
 		// If the server was shut down gracefully, err will be http.ErrServerClosed
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.shutdownErr = err
+			if s.deps.Logger != nil {
+				s.deps.Logger.Error("HTTP server error", err)
+			}
 		}
 	}()
 
@@ -136,6 +201,14 @@ func (s *server) Shutdown(ctx context.Context) error {
 
 	if !s.started {
 		return ErrServerNotStarted
+	}
+
+	// Log server shutdown
+	if s.deps.Logger != nil {
+		s.deps.Logger.Info("Shutting down HTTP server",
+			observability.NewField("address", s.server.Addr),
+			observability.NewField("timeout", s.config.ShutdownTimeout.String()),
+		)
 	}
 
 	// Create a context with timeout for shutdown
@@ -182,6 +255,11 @@ func (s *server) IsStarted() bool {
 	return s.started
 }
 
+// Config returns the server configuration
+func (s *server) Config() ServerConfig {
+	return s.config
+}
+
 // WithTLS configures the server to use TLS
 func WithTLS(certFile, keyFile string) func(*ServerConfig) {
 	return func(config *ServerConfig) {
@@ -222,8 +300,25 @@ func WithTimeouts(read, write, idle, shutdown time.Duration) func(*ServerConfig)
 	}
 }
 
+// WithCORS configures CORS for the server
+func WithCORS(enabled bool, allowOrigins string) func(*ServerConfig) {
+	return func(config *ServerConfig) {
+		config.CORS.Enabled = enabled
+		if allowOrigins != "" {
+			config.CORS.AllowOrigins = allowOrigins
+		}
+	}
+}
+
+// WithSecurityHeaders configures security headers for the server
+func WithSecurityHeaders(enabled bool) func(*ServerConfig) {
+	return func(config *ServerConfig) {
+		config.SecurityHeaders.Enabled = enabled
+	}
+}
+
 // NewServerWithOptions creates a new HTTP server with the provided options
-func NewServerWithOptions(options ...func(*ServerConfig)) Server {
+func NewServerWithOptions(deps ServerDependencies, options ...func(*ServerConfig)) Server {
 	config := DefaultServerConfig()
 
 	// Apply options
@@ -231,5 +326,5 @@ func NewServerWithOptions(options ...func(*ServerConfig)) Server {
 		option(&config)
 	}
 
-	return NewServerWithConfig(config)
+	return NewServerWithConfig(config, deps)
 }

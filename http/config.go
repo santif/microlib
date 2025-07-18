@@ -38,6 +38,15 @@ type ServerConfig struct {
 
 	// BasePath is the base path for all routes
 	BasePath string `json:"base_path" yaml:"base_path"`
+
+	// CORS contains CORS configuration
+	CORS CORSConfig `json:"cors" yaml:"cors"`
+
+	// SecurityHeaders contains security headers configuration
+	SecurityHeaders SecurityHeadersConfig `json:"security_headers" yaml:"security_headers"`
+
+	// HealthPaths are paths that should bypass certain middleware (like authentication)
+	HealthPaths []string `json:"health_paths" yaml:"health_paths"`
 }
 
 // DefaultServerConfig returns the default server configuration
@@ -52,5 +61,81 @@ func DefaultServerConfig() ServerConfig {
 		MaxHeaderBytes:  1 << 20, // 1 MB
 		EnableTLS:       false,
 		BasePath:        "",
+		CORS:            DefaultCORSConfig(),
+		SecurityHeaders: DefaultSecurityHeadersConfig(),
+		HealthPaths:     []string{"/health", "/metrics"},
+	}
+}
+
+// CORSConfig contains configuration for CORS middleware
+type CORSConfig struct {
+	// Enabled determines if CORS is enabled
+	Enabled bool `json:"enabled" yaml:"enabled"`
+
+	// AllowOrigins is a comma-separated list of origins that are allowed to access the resource
+	AllowOrigins string `json:"allow_origins" yaml:"allow_origins"`
+
+	// AllowMethods is a comma-separated list of methods that are allowed to access the resource
+	AllowMethods string `json:"allow_methods" yaml:"allow_methods"`
+
+	// AllowHeaders is a comma-separated list of headers that are allowed to be sent with the request
+	AllowHeaders string `json:"allow_headers" yaml:"allow_headers"`
+
+	// ExposeHeaders is a comma-separated list of headers that are allowed to be exposed to the client
+	ExposeHeaders string `json:"expose_headers" yaml:"expose_headers"`
+
+	// AllowCredentials indicates whether the request can include user credentials
+	AllowCredentials bool `json:"allow_credentials" yaml:"allow_credentials"`
+
+	// MaxAge indicates how long the results of a preflight request can be cached
+	MaxAge int `json:"max_age" yaml:"max_age"`
+}
+
+// DefaultCORSConfig returns the default CORS configuration
+func DefaultCORSConfig() CORSConfig {
+	return CORSConfig{
+		Enabled:          true,
+		AllowOrigins:     "*",
+		AllowMethods:     "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-Requested-With",
+		ExposeHeaders:    "Content-Length, Content-Type",
+		AllowCredentials: false,
+		MaxAge:           86400, // 24 hours
+	}
+}
+
+// SecurityHeadersConfig contains configuration for security headers middleware
+type SecurityHeadersConfig struct {
+	// Enabled determines if security headers are enabled
+	Enabled bool `json:"enabled" yaml:"enabled"`
+
+	// ContentSecurityPolicy is the Content-Security-Policy header value
+	ContentSecurityPolicy string `json:"content_security_policy" yaml:"content_security_policy"`
+
+	// XFrameOptions is the X-Frame-Options header value
+	XFrameOptions string `json:"x_frame_options" yaml:"x_frame_options"`
+
+	// XContentTypeOptions enables the X-Content-Type-Options: nosniff header
+	XContentTypeOptions bool `json:"x_content_type_options" yaml:"x_content_type_options"`
+
+	// ReferrerPolicy is the Referrer-Policy header value
+	ReferrerPolicy string `json:"referrer_policy" yaml:"referrer_policy"`
+
+	// StrictTransportSecurity is the Strict-Transport-Security header value
+	StrictTransportSecurity string `json:"strict_transport_security" yaml:"strict_transport_security"`
+
+	// XSSProtection enables the X-XSS-Protection: 1; mode=block header
+	XSSProtection bool `json:"xss_protection" yaml:"xss_protection"`
+}
+
+// DefaultSecurityHeadersConfig returns the default security headers configuration
+func DefaultSecurityHeadersConfig() SecurityHeadersConfig {
+	return SecurityHeadersConfig{
+		Enabled:                 true,
+		XFrameOptions:           "DENY",
+		XContentTypeOptions:     true,
+		ReferrerPolicy:          "strict-origin-when-cross-origin",
+		StrictTransportSecurity: "max-age=31536000; includeSubDomains",
+		XSSProtection:           true,
 	}
 }

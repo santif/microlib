@@ -7,10 +7,13 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/santif/microlib/observability"
 )
 
 func TestNewServer(t *testing.T) {
-	server := NewServer()
+	deps := ServerDependencies{}
+	server := NewServer(deps)
 	if server == nil {
 		t.Fatal("NewServer() returned nil")
 	}
@@ -19,8 +22,9 @@ func TestNewServer(t *testing.T) {
 func TestNewServerWithConfig(t *testing.T) {
 	config := DefaultServerConfig()
 	config.Port = 8081
+	deps := ServerDependencies{}
 
-	server := NewServerWithConfig(config)
+	server := NewServerWithConfig(config, deps)
 	if server == nil {
 		t.Fatal("NewServerWithConfig() returned nil")
 	}
@@ -33,7 +37,8 @@ func TestNewServerWithConfig(t *testing.T) {
 func TestServerStartAndShutdown(t *testing.T) {
 	// Use a specific port for testing
 	testPort := 8090
-	server := NewServerWithOptions(WithPort(testPort), WithHost("localhost"))
+	deps := ServerDependencies{}
+	server := NewServerWithOptions(deps, WithPort(testPort), WithHost("localhost"))
 
 	// Register a test handler before starting the server
 	server.RegisterHandler("/test", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +101,8 @@ func TestServerStartAndShutdown(t *testing.T) {
 func TestRegisterMiddleware(t *testing.T) {
 	// Use a specific port for testing
 	testPort := 8091
-	server := NewServerWithOptions(WithPort(testPort), WithHost("localhost"))
+	deps := ServerDependencies{}
+	server := NewServerWithOptions(deps, WithPort(testPort), WithHost("localhost"))
 
 	// Create a middleware that adds a header
 	middleware := func(next http.Handler) http.Handler {
@@ -144,7 +150,8 @@ func TestRegisterMiddleware(t *testing.T) {
 func TestBasePath(t *testing.T) {
 	// Use a specific port for testing
 	testPort := 8092
-	server := NewServerWithOptions(WithPort(testPort), WithHost("localhost"), WithBasePath("/api"))
+	deps := ServerDependencies{}
+	server := NewServerWithOptions(deps, WithPort(testPort), WithHost("localhost"), WithBasePath("/api"))
 
 	// Register a test handler
 	server.RegisterHandler("/test", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -178,16 +185,22 @@ func TestBasePath(t *testing.T) {
 	}
 }
 
-func TestRecoveryMiddleware(t *testing.T) {
+// TestServerRecovery tests the recovery middleware in the server
+func TestServerRecovery(t *testing.T) {
 	// Create a mock logger
-	mockLogger := &mockLogger{}
+	logger := &mockLogger3{
+		errorMessages: []string{},
+		errorFields:   []map[string]interface{}{},
+	}
 
 	// Use a specific port for testing
 	testPort := 8093
-	server := NewServerWithOptions(WithPort(testPort), WithHost("localhost"))
+	deps := ServerDependencies{
+		Logger: logger,
+	}
+	server := NewServerWithOptions(deps, WithPort(testPort), WithHost("localhost"))
 
-	// Register the recovery middleware
-	server.RegisterMiddleware(RecoveryMiddleware(mockLogger))
+	// No need to register recovery middleware as it's registered by default
 
 	// Register a handler that panics
 	server.RegisterHandler("/panic", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -220,16 +233,52 @@ func TestRecoveryMiddleware(t *testing.T) {
 	}
 
 	// Verify the logger was called
-	if !mockLogger.errorCalled {
+	if len(logger.errorMessages) == 0 {
 		t.Error("Expected logger.Error to be called")
 	}
 }
 
-// mockLogger is a mock implementation of the logger interface
-type mockLogger struct {
-	errorCalled bool
+// mockLogger3 is a mock implementation of the observability.Logger interface for testing
+type mockLogger3 struct {
+	infoMessages  []string
+	errorMessages []string
+	infoFields    []map[string]interface{}
+	errorFields   []map[string]interface{}
 }
 
-func (l *mockLogger) Error(msg string, err error, fields ...interface{}) {
-	l.errorCalled = true
+func (l *mockLogger3) Info(msg string, fields ...observability.Field) {
+	l.InfoContext(context.Background(), msg, fields...)
 }
+
+func (l *mockLogger3) InfoContext(ctx context.Context, msg string, fields ...observability.Field) {
+	l.infoMessages = append(l.infoMessages, msg)
+	fieldMap := make(map[string]interface{})
+	for _, field := range fields {
+		fieldMap[field.Key] = field.Value
+	}
+	l.infoFields = append(l.infoFields, fieldMap)
+}
+
+func (l *mockLogger3) Error(msg string, err error, fields ...observability.Field) {
+	l.ErrorContext(context.Background(), msg, err, fields...)
+}
+
+func (l *mockLogger3) ErrorContext(ctx context.Context, msg string, err error, fields ...observability.Field) {
+	l.errorMessages = append(l.errorMessages, msg)
+	fieldMap := make(map[string]interface{})
+	fieldMap["error"] = err.Error()
+	for _, field := range fields {
+		fieldMap[field.Key] = field.Value
+	}
+	l.errorFields = append(l.errorFields, fieldMap)
+}
+
+func (l *mockLogger3) Debug(msg string, fields ...observability.Field) {}
+
+func (l *mockLogger3) DebugContext(ctx context.Context, msg string, fields ...observability.Field) {}
+
+func (l *mockLogger3) Warn(msg string, fields ...observability.Field) {}
+
+func (l *mockLogger3) WarnContext(ctx context.Context, msg string, fields ...observability.Field) {}
+
+func (l *mockLogger3) WithContext(ctx context.Context) observability.Logger { return l }
