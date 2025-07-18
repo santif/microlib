@@ -85,7 +85,7 @@
   - Create /metrics endpoint handler
   - _Requirements: 4.1, 4.2_
 
-- [ ] 12. Implement OpenTelemetry tracing
+- [x] 12. Implement OpenTelemetry tracing
   - Set up OpenTelemetry SDK with automatic propagation
   - Create trace context injection and extraction
   - Implement automatic span creation for HTTP/gRPC requests
