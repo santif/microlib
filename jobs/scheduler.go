@@ -49,8 +49,11 @@ type JobMetadata struct {
 	// Singleton indicates if the job should only run on one instance at a time
 	Singleton bool
 
-	// RetryCount specifies how many times to retry on failure
+	// RetryCount specifies how many times to retry on failure (deprecated, use RetryPolicy)
 	RetryCount int
+
+	// RetryPolicy defines how the job should be retried on failure
+	RetryPolicy RetryPolicy
 
 	// Tags are arbitrary key-value pairs for job categorization
 	Tags map[string]string
@@ -64,17 +67,38 @@ type JobInfo struct {
 	// Name is the human-readable name of the job
 	Name string
 
-	// Spec is the cron specification for when the job runs
+	// Spec is the cron specification for when the job runs (for scheduled jobs)
 	Spec string
 
-	// NextRun is the next scheduled execution time
+	// NextRun is the next scheduled execution time (for scheduled jobs)
 	NextRun time.Time
 
-	// LastRun is the previous execution time, if any
+	// LastRun is the previous execution time, if any (for scheduled jobs)
 	LastRun *time.Time
 
 	// LastError contains the error from the last execution, if any
 	LastError error
+
+	// Status is the current status of the job (for queue jobs)
+	Status JobStatus
+
+	// EnqueuedAt is when the job was added to the queue (for queue jobs)
+	EnqueuedAt time.Time
+
+	// StartedAt is when the job execution began (for queue jobs)
+	StartedAt *time.Time
+
+	// FinishedAt is when the job execution completed (for queue jobs)
+	FinishedAt *time.Time
+
+	// Error contains any error that occurred during execution (for queue jobs)
+	Error error
+
+	// RetryCount is the number of retry attempts (for queue jobs)
+	RetryCount int
+
+	// NextRetry is when the job will be retried next (for queue jobs)
+	NextRetry *time.Time
 
 	// Metadata contains the job's metadata
 	Metadata JobMetadata
