@@ -98,3 +98,25 @@ func TestTransactionInterface(t *testing.T) {
 	// implements the Transaction interface at compile time
 	var _ Transaction = &MockTransaction{}
 }
+
+// MockResult implements the Result interface for testing
+type MockResult struct {
+	lastInsertId     int64
+	rowsAffected     int64
+	LastInsertIdFunc func() (int64, error)
+	RowsAffectedFunc func() (int64, error)
+}
+
+func (m *MockResult) LastInsertId() (int64, error) {
+	if m.LastInsertIdFunc != nil {
+		return m.LastInsertIdFunc()
+	}
+	return m.lastInsertId, nil
+}
+
+func (m *MockResult) RowsAffected() (int64, error) {
+	if m.RowsAffectedFunc != nil {
+		return m.RowsAffectedFunc()
+	}
+	return m.rowsAffected, nil
+}

@@ -123,25 +123,7 @@ func TestTransactionRollback(t *testing.T) {
 	}
 }
 
-// MockResult implements the Result interface for testing
-type MockResult struct {
-	LastInsertIdFunc func() (int64, error)
-	RowsAffectedFunc func() (int64, error)
-}
-
-func (m *MockResult) LastInsertId() (int64, error) {
-	if m.LastInsertIdFunc != nil {
-		return m.LastInsertIdFunc()
-	}
-	return 0, nil
-}
-
-func (m *MockResult) RowsAffected() (int64, error) {
-	if m.RowsAffectedFunc != nil {
-		return m.RowsAffectedFunc()
-	}
-	return 0, nil
-}
+// MockResult is defined in database_test.go
 
 // TestResultInterface ensures that our interfaces are properly defined
 func TestResultInterface(t *testing.T) {
