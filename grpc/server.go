@@ -281,7 +281,17 @@ func (s *server) createServerOptions() []grpc.ServerOption {
 }
 
 // Shutdown gracefully shuts down the server
+// It first attempts a graceful shutdown, and if that times out, it forces a shutdown.
+// The method ensures all resources are properly released, including the gRPC server and listener.
+//
+// IMPORTANT: We get the server address before acquiring the lock to avoid deadlock.
+// Previously, this method would call s.Address() while holding the write lock,
+// but s.Address() tries to acquire a read lock on the same mutex, causing a deadlock.
 func (s *server) Shutdown(ctx context.Context) error {
+	// Get the server address before acquiring the lock to avoid deadlock
+	// since Address() also acquires the lock
+	serverAddr := s.Address()
+
 	s.startedMu.Lock()
 	defer s.startedMu.Unlock()
 
@@ -292,7 +302,7 @@ func (s *server) Shutdown(ctx context.Context) error {
 	// Log server shutdown
 	if s.deps.Logger != nil {
 		s.deps.Logger.Info("Shutting down gRPC server",
-			observability.NewField("address", s.Address()),
+			observability.NewField("address", serverAddr),
 			observability.NewField("timeout", s.config.ShutdownTimeout.String()),
 		)
 	}
@@ -312,27 +322,54 @@ func (s *server) Shutdown(ctx context.Context) error {
 	}()
 
 	// Wait for the server to stop or the context to be canceled
+	var forceShutdown bool
 	select {
 	case <-stopped:
 		// Server stopped gracefully
+		if s.deps.Logger != nil {
+			s.deps.Logger.Info("gRPC server stopped gracefully")
+		}
 	case <-shutdownCtx.Done():
 		// Context canceled, force stop the server
+		forceShutdown = true
+		if s.deps.Logger != nil {
+			s.deps.Logger.Warn("gRPC server graceful shutdown timed out, forcing stop",
+				observability.NewField("timeout", s.config.ShutdownTimeout.String()))
+		}
 		s.server.Stop()
-		return fmt.Errorf("server shutdown timed out: %w", shutdownCtx.Err())
+	}
+
+	// Close the listener if it's still open
+	if s.listener != nil {
+		if err := s.listener.Close(); err != nil {
+			if s.deps.Logger != nil {
+				s.deps.Logger.Error("Error closing gRPC listener", err)
+			}
+		}
+		s.listener = nil
 	}
 
 	// Mark the server as stopped
 	s.started = false
+	s.server = nil
 
 	// Return any error that occurred during server operation
 	if s.shutdownErr != nil {
 		return fmt.Errorf("server error: %w", s.shutdownErr)
 	}
 
+	// Return timeout error if we had to force shutdown
+	if forceShutdown {
+		return fmt.Errorf("server shutdown timed out after %s", s.config.ShutdownTimeout.String())
+	}
+
 	return nil
 }
 
 // Address returns the server's address
+// Note: This method acquires a read lock on startedMu.
+// Be careful not to call this method while holding a write lock on startedMu
+// as it will cause a deadlock.
 func (s *server) Address() string {
 	s.startedMu.RLock()
 	defer s.startedMu.RUnlock()

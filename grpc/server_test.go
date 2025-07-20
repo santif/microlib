@@ -2,6 +2,8 @@ package grpc
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -129,8 +131,8 @@ func TestStartAndShutdown(t *testing.T) {
 		Tracer:  &mockTracer{},
 	}
 
-	// Create a server with a random port
-	server := NewServerWithOptions(deps, WithPort(0))
+	// Create a server with a random port and short shutdown timeout
+	server := NewServerWithOptions(deps, WithPort(0), WithShutdownTimeout(2*time.Second))
 
 	// Start the server
 	ctx := context.Background()
@@ -150,8 +152,12 @@ func TestStartAndShutdown(t *testing.T) {
 		t.Error("Expected non-empty server address")
 	}
 
+	// Create a context with timeout to ensure the test doesn't hang
+	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	// Shutdown the server
-	err = server.Shutdown(ctx)
+	err = server.Shutdown(shutdownCtx)
 	if err != nil {
 		t.Fatalf("Failed to shutdown server: %v", err)
 	}
@@ -269,6 +275,105 @@ func TestTLSConfiguration(t *testing.T) {
 func TestInterceptors(t *testing.T) {
 	// Skip this test for now
 	t.Skip("Interceptor test requires a full gRPC client and server setup")
+}
+
+// TestShutdownTimeout tests that the server can be forcefully shut down if the graceful shutdown times out
+func TestShutdownTimeout(t *testing.T) {
+	// Create dependencies
+	deps := ServerDependencies{
+		Logger:  observability.NewLogger(),
+		Metrics: observability.NewMetrics(),
+		Tracer:  &mockTracer{},
+	}
+
+	// Create a server with a very short shutdown timeout
+	server := NewServerWithOptions(deps, WithPort(0), WithShutdownTimeout(1*time.Millisecond))
+
+	// Start the server
+	ctx := context.Background()
+	err := server.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+
+	// Ensure the server is started
+	if !server.IsStarted() {
+		t.Error("Expected server to be started")
+	}
+
+	// Shutdown the server with a timeout
+	// This should trigger a forced shutdown since 1ms is too short for graceful shutdown
+	err = server.Shutdown(ctx)
+
+	// We expect an error about timeout
+	if err == nil {
+		t.Error("Expected shutdown to return timeout error")
+	} else if !isTimeoutError(err) {
+		t.Errorf("Expected timeout error, got: %v", err)
+	}
+
+	// Check that the server is stopped despite the timeout
+	if server.IsStarted() {
+		t.Error("Expected server to be stopped after forced shutdown")
+	}
+}
+
+// TestConcurrentShutdown tests that concurrent calls to Shutdown don't cause deadlocks
+func TestConcurrentShutdown(t *testing.T) {
+	// Create dependencies
+	deps := ServerDependencies{
+		Logger:  observability.NewLogger(),
+		Metrics: observability.NewMetrics(),
+		Tracer:  &mockTracer{},
+	}
+
+	// Create a server
+	server := NewServerWithOptions(deps, WithPort(0))
+
+	// Start the server
+	ctx := context.Background()
+	err := server.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+
+	// Create a wait group for concurrent shutdown calls
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Create a channel to collect errors
+	errCh := make(chan error, 2)
+
+	// Call Shutdown concurrently
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			err := server.Shutdown(ctx)
+			if err != nil && err != ErrServerNotStarted {
+				errCh <- err
+			}
+		}()
+	}
+
+	// Wait for both shutdown calls to complete
+	wg.Wait()
+	close(errCh)
+
+	// Check for errors
+	for err := range errCh {
+		t.Errorf("Concurrent shutdown error: %v", err)
+	}
+
+	// Check that the server is stopped
+	if server.IsStarted() {
+		t.Error("Expected server to be stopped")
+	}
+}
+
+// isTimeoutError checks if an error is related to a timeout
+func isTimeoutError(err error) bool {
+	return strings.Contains(strings.ToLower(err.Error()), "timeout") ||
+		strings.Contains(strings.ToLower(err.Error()), "timed out")
 }
 
 // Additional tests for error cases, configuration options, etc. would go here
