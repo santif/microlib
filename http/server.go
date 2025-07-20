@@ -103,6 +103,14 @@ func (s *server) registerDefaultMiddleware() {
 		s.RegisterMiddleware(CORSMiddleware(s.config.CORS))
 	}
 
+	// Add authentication if enabled
+	if s.config.Auth != nil && s.config.Auth.Enabled {
+		// Register the authentication middleware
+		if err := RegisterAuthMiddleware(s, s.deps.Logger); err != nil && s.deps.Logger != nil {
+			s.deps.Logger.Error("Failed to register authentication middleware", err)
+		}
+	}
+
 	// Add OpenAPI validation if enabled
 	if s.config.OpenAPI != nil && s.config.OpenAPI.Enabled &&
 		(s.config.OpenAPI.ValidateRequests || s.config.OpenAPI.ValidateResponses) {

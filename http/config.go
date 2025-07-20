@@ -50,11 +50,15 @@ type ServerConfig struct {
 
 	// OpenAPI contains OpenAPI configuration
 	OpenAPI *OpenAPIConfig `json:"openapi" yaml:"openapi"`
+
+	// Auth contains authentication configuration
+	Auth *AuthConfig `json:"auth" yaml:"auth"`
 }
 
 // DefaultServerConfig returns the default server configuration
 func DefaultServerConfig() ServerConfig {
 	openAPIConfig := DefaultOpenAPIConfig()
+	authConfig := DefaultAuthConfig()
 	return ServerConfig{
 		Host:            "0.0.0.0",
 		Port:            8080,
@@ -69,6 +73,7 @@ func DefaultServerConfig() ServerConfig {
 		SecurityHeaders: DefaultSecurityHeadersConfig(),
 		HealthPaths:     []string{"/health", "/metrics"},
 		OpenAPI:         &openAPIConfig,
+		Auth:            &authConfig,
 	}
 }
 
