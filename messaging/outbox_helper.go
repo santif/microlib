@@ -29,6 +29,8 @@ func SaveToOutbox(ctx context.Context, tx data.Transaction, store OutboxStore, t
 }
 
 // PublishFromOutbox publishes pending messages from the outbox to the broker
+// This is a simple implementation that processes a single batch of messages.
+// For continuous processing with retries and backoff, use OutboxRelay instead.
 func PublishFromOutbox(ctx context.Context, store OutboxStore, broker Broker, batchSize int) error {
 	messages, err := store.GetPendingMessages(ctx, batchSize)
 	if err != nil {

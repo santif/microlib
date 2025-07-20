@@ -297,3 +297,39 @@ func TestPostgresOutboxStore_MarkFailed(t *testing.T) {
 
 	mockDB.AssertExpectations(t)
 }
+
+// Test for PublishFromOutbox with the relay processor
+func TestPublishFromOutbox(t *testing.T) {
+	mockDB := new(MockDatabase)
+	mockBroker := new(MockBroker)
+	store := NewPostgresOutboxStore(mockDB)
+
+	ctx := context.Background()
+	now := time.Now()
+	headersJSON := []byte(`{"key":"value"}`)
+
+	// We don't need to create mock messages here since we're mocking the database response
+
+	// Setup mock rows
+	mockRows := NewMockRows([][]interface{}{
+		{"msg-123", "test-topic", []byte("test payload"), headersJSON, now, nil, 0, ""},
+	})
+	mockRows.On("Close").Return(nil)
+	mockRows.On("Err").Return(nil)
+
+	// Setup expectations
+	mockDB.On("Query", ctx, mock.AnythingOfType("string"), 10).Return(mockRows, nil)
+	mockResult := new(MockResult)
+	mockDB.On("Exec", ctx, mock.AnythingOfType("string"), mock.AnythingOfType("time.Time"), "msg-123").Return(mockResult, nil)
+
+	// Setup broker expectations
+	mockBroker.On("Publish", ctx, "test-topic", mock.AnythingOfType("*messaging.DefaultMessage")).Return(nil)
+
+	// Call the function
+	err := PublishFromOutbox(ctx, store, mockBroker, 10)
+	assert.NoError(t, err)
+
+	// Verify expectations
+	mockDB.AssertExpectations(t)
+	mockBroker.AssertExpectations(t)
+}
