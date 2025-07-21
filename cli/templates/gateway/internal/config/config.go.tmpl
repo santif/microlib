@@ -1,0 +1,87 @@
+package config
+
+import (
+	"time"
+
+	"github.com/santif/microlib/observability"
+	"github.com/santif/microlib/http"
+	"github.com/santif/microlib/data"
+)
+
+// Config represents the gateway service configuration
+type Config struct {
+	Service       ServiceConfig              `yaml:"service" validate:"required"`
+	HTTP          http.Config                `yaml:"http" validate:"required"`
+	Cache         data.RedisConfig           `yaml:"cache" validate:"required"`
+	Gateway       GatewayConfig              `yaml:"gateway" validate:"required"`
+	Logging       observability.LogConfig    `yaml:"logging" validate:"required"`
+	Observability observability.Config       `yaml:"observability" validate:"required"`
+}
+
+// ServiceConfig contains service-specific configuration
+type ServiceConfig struct {
+	Instance  string `yaml:"instance" validate:"required"`
+	BuildHash string `yaml:"build_hash"`
+}
+
+// GatewayConfig contains gateway-specific configuration
+type GatewayConfig struct {
+	Routes      []RouteConfig    `yaml:"routes" validate:"required,dive"`
+	RateLimit   RateLimitConfig  `yaml:"rate_limit"`
+	Auth        AuthConfig       `yaml:"auth"`
+	CORS        CORSConfig       `yaml:"cors"`
+	Timeout     TimeoutConfig    `yaml:"timeout"`
+}
+
+// RouteConfig defines a route configuration
+type RouteConfig struct {
+	Path        string            `yaml:"path" validate:"required"`
+	Method      string            `yaml:"method" validate:"required"`
+	Target      string            `yaml:"target" validate:"required,url"`
+	StripPrefix bool              `yaml:"strip_prefix"`
+	Headers     map[string]string `yaml:"headers"`
+	Auth        *RouteAuthConfig  `yaml:"auth"`
+	RateLimit   *RateLimitConfig  `yaml:"rate_limit"`
+}
+
+// RouteAuthConfig defines authentication for a specific route
+type RouteAuthConfig struct {
+	Required bool     `yaml:"required"`
+	Roles    []string `yaml:"roles"`
+	Scopes   []string `yaml:"scopes"`
+}
+
+// RateLimitConfig defines rate limiting configuration
+type RateLimitConfig struct {
+	Enabled     bool          `yaml:"enabled"`
+	RequestsPerMinute int     `yaml:"requests_per_minute" validate:"min=1"`
+	BurstSize   int           `yaml:"burst_size" validate:"min=1"`
+	WindowSize  time.Duration `yaml:"window_size"`
+}
+
+// AuthConfig defines authentication configuration
+type AuthConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	JWKSUrl   string `yaml:"jwks_url" validate:"url"`
+	Issuer    string `yaml:"issuer"`
+	Audience  string `yaml:"audience"`
+}
+
+// CORSConfig defines CORS configuration
+type CORSConfig struct {
+	Enabled          bool     `yaml:"enabled"`
+	AllowedOrigins   []string `yaml:"allowed_origins"`
+	AllowedMethods   []string `yaml:"allowed_methods"`
+	AllowedHeaders   []string `yaml:"allowed_headers"`
+	ExposedHeaders   []string `yaml:"exposed_headers"`
+	AllowCredentials bool     `yaml:"allow_credentials"`
+	MaxAge           int      `yaml:"max_age"`
+}
+
+// TimeoutConfig defines timeout configuration
+type TimeoutConfig struct {
+	Read    time.Duration `yaml:"read"`
+	Write   time.Duration `yaml:"write"`
+	Idle    time.Duration `yaml:"idle"`
+	Handler time.Duration `yaml:"handler"`
+}

@@ -1,0 +1,89 @@
+package jobs
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/santif/microlib/data"
+)
+
+// CleanupJob handles cleanup of old data and temporary files
+type CleanupJob struct {
+	logger *slog.Logger
+	db     data.Database
+}
+
+// NewCleanupJob creates a new cleanup job
+func NewCleanupJob(logger *slog.Logger, db data.Database) *CleanupJob {
+	return &CleanupJob{
+		logger: logger,
+		db:     db,
+	}
+}
+
+// Execute runs the cleanup job
+func (j *CleanupJob) Execute(ctx context.Context) error {
+	j.logger.Info("Starting cleanup job")
+	
+	// Clean up old records (older than 30 days)
+	cutoffDate := time.Now().AddDate(0, 0, -30)
+	
+	// Example: Clean up old audit logs
+	query := `DELETE FROM audit_logs WHERE created_at < $1`
+	result, err := j.db.Exec(ctx, query, cutoffDate)
+	if err != nil {
+		j.logger.Error("Failed to clean up audit logs", "error", err)
+		return err
+	}
+	
+	rowsAffected, _ := result.RowsAffected()
+	j.logger.Info("Cleaned up audit logs", "rows_deleted", rowsAffected)
+	
+	// Example: Clean up expired sessions
+	query = `DELETE FROM user_sessions WHERE expires_at < NOW()`
+	result, err = j.db.Exec(ctx, query)
+	if err != nil {
+		j.logger.Error("Failed to clean up expired sessions", "error", err)
+		return err
+	}
+	
+	rowsAffected, _ = result.RowsAffected()
+	j.logger.Info("Cleaned up expired sessions", "rows_deleted", rowsAffected)
+	
+	// Example: Clean up temporary files
+	if err := j.cleanupTempFiles(ctx); err != nil {
+		j.logger.Error("Failed to clean up temporary files", "error", err)
+		return err
+	}
+	
+	j.logger.Info("Cleanup job completed successfully")
+	return nil
+}
+
+// cleanupTempFiles removes old temporary files
+func (j *CleanupJob) cleanupTempFiles(ctx context.Context) error {
+	// Add your temporary file cleanup logic here
+	// Example: Remove files from /tmp older than 24 hours
+	j.logger.Info("Cleaning up temporary files")
+	
+	// Implementation would go here
+	// This is just a placeholder
+	
+	return nil
+}
+
+// ID returns the job identifier
+func (j *CleanupJob) ID() string {
+	return "cleanup-job"
+}
+
+// RetryPolicy returns the retry policy for this job
+func (j *CleanupJob) RetryPolicy() jobs.RetryPolicy {
+	return jobs.RetryPolicy{
+		MaxRetries:      3,
+		InitialInterval: time.Minute,
+		MaxInterval:     time.Hour,
+		Multiplier:      2.0,
+	}
+}

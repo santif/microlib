@@ -1,0 +1,52 @@
+package config
+
+import (
+	"github.com/santif/microlib/observability"
+	"github.com/santif/microlib/http"
+	{{- if .WithGRPC}}
+	"github.com/santif/microlib/grpc"
+	{{- end}}
+	"github.com/santif/microlib/data"
+	{{- if .WithCache}}
+	"github.com/santif/microlib/data"
+	{{- end}}
+	{{- if .WithJobs}}
+	"github.com/santif/microlib/jobs"
+	{{- end}}
+	{{- if .WithMessaging}}
+	"github.com/santif/microlib/messaging"
+	{{- end}}
+	{{- if .WithAuth}}
+	"github.com/santif/microlib/security"
+	{{- end}}
+)
+
+// Config represents the API service configuration
+type Config struct {
+	Service       ServiceConfig              `yaml:"service" validate:"required"`
+	HTTP          http.Config                `yaml:"http" validate:"required"`
+	{{- if .WithGRPC}}
+	GRPC          grpc.Config                `yaml:"grpc" validate:"required"`
+	{{- end}}
+	Database      data.PostgresConfig        `yaml:"database" validate:"required"`
+	{{- if .WithCache}}
+	Cache         data.RedisConfig           `yaml:"cache" validate:"required"`
+	{{- end}}
+	{{- if .WithJobs}}
+	Jobs          jobs.Config                `yaml:"jobs" validate:"required"`
+	{{- end}}
+	{{- if .WithMessaging}}
+	Messaging     messaging.Config           `yaml:"messaging" validate:"required"`
+	{{- end}}
+	{{- if .WithAuth}}
+	Auth          security.AuthConfig        `yaml:"auth" validate:"required"`
+	{{- end}}
+	Logging       observability.LogConfig    `yaml:"logging" validate:"required"`
+	Observability observability.Config       `yaml:"observability" validate:"required"`
+}
+
+// ServiceConfig contains service-specific configuration
+type ServiceConfig struct {
+	Instance  string `yaml:"instance" validate:"required"`
+	BuildHash string `yaml:"build_hash"`
+}

@@ -1,0 +1,286 @@
+# {{.ServiceNameCap}} API Service
+
+A MicroLib-based REST API service for {{.ServiceName}}.
+
+## Features
+
+- ✅ HTTP REST API with comprehensive middleware stack
+{{- if .WithGRPC}}
+- ✅ gRPC server with interceptors
+{{- end}}
+- ✅ Structured logging with slog and trace correlation
+- ✅ Prometheus metrics collection
+- ✅ OpenTelemetry distributed tracing
+- ✅ Health checks (liveness, readiness, startup)
+- ✅ Graceful shutdown with configurable timeout
+- ✅ PostgreSQL database integration with connection pooling
+{{- if .WithCache}}
+- ✅ Redis caching layer
+{{- end}}
+{{- if .WithMessaging}}
+- ✅ Event-driven architecture with messaging
+{{- end}}
+{{- if .WithAuth}}
+- ✅ JWT authentication and authorization
+{{- end}}
+- ✅ Configuration management with validation
+- ✅ Database migrations and seeding
+- ✅ Docker and Docker Compose support
+- ✅ Comprehensive test suite
+
+## API Endpoints
+
+### Health Checks
+- `GET /health` - Overall health status with dependency checks
+- `GET /health/live` - Liveness probe (always returns 200 if service is running)
+- `GET /health/ready` - Readiness probe (checks dependencies)
+
+### Users API
+- `GET /api/v1/users` - List all users
+- `POST /api/v1/users` - Create a new user
+- `GET /api/v1/users/{id}` - Get user by ID
+- `PUT /api/v1/users/{id}` - Update user by ID
+- `DELETE /api/v1/users/{id}` - Delete user by ID
+
+### Utility
+- `GET /api/v1/ping` - Simple ping endpoint
+- `GET /metrics` - Prometheus metrics
+
+## Quick Start
+
+### Prerequisites
+
+- Go {{.GoVersion}} or later
+- PostgreSQL 13+
+{{- if .WithCache}}
+- Redis 6+
+{{- end}}
+{{- if .WithMessaging}}
+- RabbitMQ 3.8+ or Kafka 2.8+
+{{- end}}
+- Docker and Docker Compose (optional)
+
+### Development Setup
+
+1. **Clone and setup**
+   ```bash
+   git clone <your-repo>
+   cd {{.ServiceName}}
+   make deps
+   ```
+
+2. **Start dependencies**
+   ```bash
+   docker-compose up postgres{{if .WithCache}} redis{{end}}{{if .WithMessaging}} rabbitmq{{end}} -d
+   ```
+
+3. **Run migrations**
+   ```bash
+   make build
+   make migrate-up
+   ```
+
+4. **Start the service**
+   ```bash
+   make run
+   ```
+
+The API will be available at `http://localhost:8080`
+
+### Docker Setup
+
+```bash
+# Build and run everything
+make docker-run
+
+# Or manually
+docker-compose up --build
+```
+
+## Configuration
+
+Configuration is loaded from multiple sources in order of priority:
+1. Environment variables
+2. `config.yaml` file
+3. Command line flags
+
+### Environment Variables
+
+```bash
+# Service
+SERVICE_INSTANCE={{.ServiceName}}-1
+SERVICE_BUILD_HASH=abc123
+
+# HTTP Server
+HTTP_PORT=8080
+HTTP_HOST=0.0.0.0
+
+{{- if .WithGRPC}}
+# gRPC Server
+GRPC_PORT=9090
+GRPC_HOST=0.0.0.0
+{{- end}}
+
+# Database
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_NAME={{.ServiceName}}_db
+
+{{- if .WithCache}}
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
+{{- end}}
+
+{{- if .WithMessaging}}
+# Messaging
+MESSAGING_BROKER_TYPE=rabbitmq
+RABBITMQ_URL=amqp://guest:guest@localhost:5672/
+{{- end}}
+
+# Logging
+LOG_LEVEL=info
+LOG_FORMAT=json
+```
+
+## Development
+
+### Available Commands
+
+```bash
+make help          # Show available commands
+make build         # Build the application
+make test          # Run tests with coverage
+make run           # Run the application
+make lint          # Lint the code
+make format        # Format the code
+make clean         # Clean build artifacts
+make docker-build  # Build Docker image
+make docker-run    # Run with Docker Compose
+make migrate-up    # Apply database migrations
+make migrate-down  # Rollback database migrations
+make seed          # Apply database seeds
+```
+
+### Project Structure
+
+```
+{{.ServiceName}}/
+├── cmd/                    # Application commands
+│   └── server.go          # Main server command
+├── internal/
+│   ├── config/            # Configuration structures
+│   ├── handlers/          # HTTP/gRPC handlers
+│   │   ├── handlers.go    # Main handlers setup
+│   │   ├── health.go      # Health check handlers
+│   │   └── users.go       # User API handlers
+│   ├── models/            # Data models and DTOs
+│   │   └── user.go        # User model and requests
+│   ├── services/          # Business logic layer
+│   │   └── user_service.go # User business logic
+│   └── repositories/      # Data access layer
+│       └── user_repository.go # User data access
+├── migrations/            # Database migrations
+│   └── 001_create_users_table.sql
+├── api/                   # API specifications
+├── main.go               # Application entry point
+├── config.yaml           # Default configuration
+├── Dockerfile            # Docker image definition
+├── docker-compose.yml    # Local development setup
+└── Makefile              # Build automation
+```
+
+### Adding New Features
+
+1. **Models**: Add new data models in `internal/models/`
+2. **Repositories**: Add data access logic in `internal/repositories/`
+3. **Services**: Add business logic in `internal/services/`
+4. **Handlers**: Add HTTP handlers in `internal/handlers/`
+5. **Migrations**: Create database changes in `migrations/`
+
+### Example API Usage
+
+```bash
+# Create a user
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Content-Type: application/json" \
+  -d '{"email": "john@example.com", "name": "John Doe"}'
+
+# Get all users
+curl http://localhost:8080/api/v1/users
+
+# Get a specific user
+curl http://localhost:8080/api/v1/users/1
+
+# Update a user
+curl -X PUT http://localhost:8080/api/v1/users/1 \
+  -H "Content-Type: application/json" \
+  -d '{"name": "John Smith"}'
+
+# Delete a user
+curl -X DELETE http://localhost:8080/api/v1/users/1
+```
+
+## Testing
+
+```bash
+# Run all tests
+make test
+
+# Run tests with verbose output
+go test -v ./...
+
+# Run tests for specific package
+go test -v ./internal/services
+
+# Run tests with race detection
+go test -race ./...
+
+# Run integration tests
+go test -tags=integration ./...
+```
+
+## Monitoring and Observability
+
+- **Metrics**: Available at `/metrics` endpoint (Prometheus format)
+- **Health**: Available at `/health` endpoints for Kubernetes probes
+- **Tracing**: OpenTelemetry traces sent to configured endpoint
+- **Logs**: Structured JSON logs with trace correlation
+
+### Key Metrics
+
+- `http_requests_total` - Total HTTP requests by method, path, and status
+- `http_request_duration_seconds` - HTTP request latency histogram
+- `database_connections_active` - Active database connections
+- `cache_operations_total` - Cache operations by type and result
+
+## Deployment
+
+### Docker
+
+```bash
+# Build image
+make docker-build
+
+# Run with compose
+make docker-run
+```
+
+### Kubernetes
+
+See `deployments/` directory for Kubernetes manifests.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Run `make test lint`
+6. Submit a pull request
+
+## License
+
+{{.License}}

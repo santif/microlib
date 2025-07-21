@@ -1,0 +1,176 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"github.com/santif/microlib/core"
+	"github.com/santif/microlib/config"
+	"github.com/santif/microlib/observability"
+	"github.com/santif/microlib/http"
+	{{- if .WithGRPC}}
+	"github.com/santif/microlib/grpc"
+	{{- end}}
+	"github.com/santif/microlib/data"
+	{{- if .WithCache}}
+	"github.com/santif/microlib/data"
+	{{- end}}
+	{{- if .WithMessaging}}
+	"github.com/santif/microlib/messaging"
+	{{- end}}
+
+	appconfig "{{.ModuleName}}/internal/config"
+	"{{.ModuleName}}/internal/handlers"
+	"{{.ModuleName}}/internal/services"
+	"{{.ModuleName}}/internal/repositories"
+)
+
+// Run starts the {{.ServiceName}} API service
+func Run(ctx context.Context) error {
+	// Load configuration
+	cfg, err := loadConfig()
+	if err != nil {
+		return fmt.Errorf("loading configuration: %w", err)
+	}
+
+	// Initialize logger
+	logger := observability.NewLogger(cfg.Logging)
+	slog.SetDefault(logger.Slog())
+
+	// Initialize observability
+	obs, err := observability.New(cfg.Observability)
+	if err != nil {
+		return fmt.Errorf("initializing observability: %w", err)
+	}
+	defer obs.Shutdown(ctx)
+
+	// Initialize database
+	db, err := data.NewPostgresDB(ctx, cfg.Database)
+	if err != nil {
+		return fmt.Errorf("connecting to database: %w", err)
+	}
+	defer db.Close()
+
+	{{- if .WithCache}}
+	// Initialize cache
+	cache, err := data.NewRedisCache(ctx, cfg.Cache)
+	if err != nil {
+		return fmt.Errorf("connecting to cache: %w", err)
+	}
+	defer cache.Close()
+	{{- end}}
+
+	{{- if .WithMessaging}}
+	// Initialize messaging broker
+	broker, err := messaging.NewBroker(cfg.Messaging)
+	if err != nil {
+		return fmt.Errorf("initializing messaging: %w", err)
+	}
+	defer broker.Close()
+	{{- end}}
+
+	// Initialize repositories
+	userRepo := repositories.NewUserRepository(db)
+
+	// Initialize services
+	userService := services.NewUserService(services.UserServiceConfig{
+		Logger: logger,
+		UserRepo: userRepo,
+		{{- if .WithCache}}
+		Cache: cache,
+		{{- end}}
+		{{- if .WithMessaging}}
+		Broker: broker,
+		{{- end}}
+	})
+
+	// Create service metadata
+	metadata := core.ServiceMetadata{
+		Name:      "{{.ServiceName}}",
+		Version:   "1.0.0",
+		Instance:  cfg.Service.Instance,
+		BuildHash: cfg.Service.BuildHash,
+	}
+
+	// Create service
+	service := core.NewService(metadata)
+
+	// Register dependencies for health checks
+	service.RegisterDependency("database", db)
+	{{- if .WithCache}}
+	service.RegisterDependency("cache", cache)
+	{{- end}}
+	{{- if .WithMessaging}}
+	service.RegisterDependency("messaging", broker)
+	{{- end}}
+
+	// Initialize handlers
+	h := handlers.New(handlers.Config{
+		Logger: logger,
+		UserService: userService,
+		{{- if .WithMessaging}}
+		Broker: broker,
+		{{- end}}
+	})
+
+	// Initialize HTTP server
+	httpServer := http.NewServer(cfg.HTTP)
+	h.RegisterHTTPRoutes(httpServer)
+
+	{{- if .WithGRPC}}
+	// Initialize gRPC server
+	grpcServer := grpc.NewServer(cfg.GRPC)
+	h.RegisterGRPCServices(grpcServer)
+	{{- end}}
+
+	// Start service
+	return service.Run(ctx, func(ctx context.Context) error {
+		// Start HTTP server
+		go func() {
+			if err := httpServer.Start(ctx); err != nil {
+				logger.Error("HTTP server failed", "error", err)
+			}
+		}()
+
+		{{- if .WithGRPC}}
+		// Start gRPC server
+		go func() {
+			if err := grpcServer.Start(ctx); err != nil {
+				logger.Error("gRPC server failed", "error", err)
+			}
+		}()
+		{{- end}}
+
+		// Wait for context cancellation
+		<-ctx.Done()
+
+		// Graceful shutdown
+		{{- if .WithGRPC}}
+		grpcServer.Shutdown(ctx)
+		{{- end}}
+		httpServer.Shutdown(ctx)
+
+		return nil
+	})
+}
+
+// loadConfig loads the service configuration
+func loadConfig() (*appconfig.Config, error) {
+	manager := config.NewManager()
+	
+	// Add configuration sources in priority order
+	manager.AddSource(config.NewEnvSource())
+	manager.AddSource(config.NewFileSource("config.yaml"))
+	
+	var cfg appconfig.Config
+	if err := manager.Load(&cfg); err != nil {
+		return nil, err
+	}
+	
+	if err := manager.Validate(&cfg); err != nil {
+		return nil, err
+	}
+	
+	return &cfg, nil
+}

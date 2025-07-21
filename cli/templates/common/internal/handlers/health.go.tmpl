@@ -1,0 +1,81 @@
+package handlers
+
+import (
+	"net/http"
+	"encoding/json"
+)
+
+// HealthResponse represents a health check response
+type HealthResponse struct {
+	Status  string            `json:"status"`
+	Service string            `json:"service"`
+	Version string            `json:"version"`
+	Checks  map[string]string `json:"checks,omitempty"`
+}
+
+// HealthHandler handles health check requests
+func (h *Handlers) HealthHandler(w http.ResponseWriter, r *http.Request) {
+	response := HealthResponse{
+		Status:  "healthy",
+		Service: "{{.ServiceName}}",
+		Version: "1.0.0",
+		Checks:  make(map[string]string),
+	}
+
+	{{- if or (eq .ServiceType "api") (eq .ServiceType "event") (eq .ServiceType "worker") (eq .ServiceType "scheduler")}}
+	// Add database check
+	if h.DB != nil {
+		if err := h.DB.Ping(r.Context()); err != nil {
+			response.Status = "unhealthy"
+			response.Checks["database"] = "unhealthy: " + err.Error()
+		} else {
+			response.Checks["database"] = "healthy"
+		}
+	}
+	{{- end}}
+
+	{{- if .WithCache}}
+	// Add cache check
+	if h.Cache != nil {
+		if err := h.Cache.Ping(r.Context()); err != nil {
+			response.Status = "unhealthy"
+			response.Checks["cache"] = "unhealthy: " + err.Error()
+		} else {
+			response.Checks["cache"] = "healthy"
+		}
+	}
+	{{- end}}
+
+	{{- if .WithMessaging}}
+	// Add messaging check
+	if h.Broker != nil {
+		if err := h.Broker.HealthCheck(r.Context()); err != nil {
+			response.Status = "unhealthy"
+			response.Checks["messaging"] = "unhealthy: " + err.Error()
+		} else {
+			response.Checks["messaging"] = "healthy"
+		}
+	}
+	{{- end}}
+
+	w.Header().Set("Content-Type", "application/json")
+	if response.Status == "unhealthy" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	
+	json.NewEncoder(w).Encode(response)
+}
+
+// LivenessHandler handles liveness probe requests
+func (h *Handlers) LivenessHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+// ReadinessHandler handles readiness probe requests
+func (h *Handlers) ReadinessHandler(w http.ResponseWriter, r *http.Request) {
+	// Check if service is ready to accept traffic
+	// This could include checking database connections, etc.
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Ready"))
+}

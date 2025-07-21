@@ -1,0 +1,132 @@
+package jobs
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/santif/microlib/data"
+)
+
+// BackupJob handles database backup operations
+type BackupJob struct {
+	logger *slog.Logger
+	db     data.Database
+}
+
+// NewBackupJob creates a new backup job
+func NewBackupJob(logger *slog.Logger, db data.Database) *BackupJob {
+	return &BackupJob{
+		logger: logger,
+		db:     db,
+	}
+}
+
+// Execute runs the backup job
+func (j *BackupJob) Execute(ctx context.Context) error {
+	j.logger.Info("Starting database backup job")
+	
+	// Generate backup filename with timestamp
+	timestamp := time.Now().Format("20060102_150405")
+	backupFile := fmt.Sprintf("backup_%s.sql", timestamp)
+	
+	// Perform database backup
+	if err := j.performBackup(ctx, backupFile); err != nil {
+		j.logger.Error("Database backup failed", "error", err, "file", backupFile)
+		return fmt.Errorf("performing backup: %w", err)
+	}
+	
+	// Verify backup integrity
+	if err := j.verifyBackup(ctx, backupFile); err != nil {
+		j.logger.Error("Backup verification failed", "error", err, "file", backupFile)
+		return fmt.Errorf("verifying backup: %w", err)
+	}
+	
+	// Clean up old backups
+	if err := j.cleanupOldBackups(ctx); err != nil {
+		j.logger.Warn("Failed to clean up old backups", "error", err)
+		// Don't fail the job for cleanup errors
+	}
+	
+	j.logger.Info("Database backup completed successfully", "file", backupFile)
+	return nil
+}
+
+// performBackup creates a database backup
+func (j *BackupJob) performBackup(ctx context.Context, filename string) error {
+	j.logger.Info("Creating database backup", "file", filename)
+	
+	// In a real implementation, you would:
+	// 1. Use pg_dump for PostgreSQL or mysqldump for MySQL
+	// 2. Stream the backup to a file or cloud storage
+	// 3. Handle compression and encryption
+	// 4. Monitor backup progress
+	
+	// Example for PostgreSQL:
+	// cmd := exec.CommandContext(ctx, "pg_dump", 
+	//     "-h", dbHost,
+	//     "-U", dbUser,
+	//     "-d", dbName,
+	//     "-f", filename,
+	//     "--verbose")
+	// 
+	// if err := cmd.Run(); err != nil {
+	//     return fmt.Errorf("pg_dump failed: %w", err)
+	// }
+	
+	// Simulate backup creation
+	time.Sleep(5 * time.Second)
+	
+	return nil
+}
+
+// verifyBackup verifies the integrity of a backup file
+func (j *BackupJob) verifyBackup(ctx context.Context, filename string) error {
+	j.logger.Info("Verifying backup integrity", "file", filename)
+	
+	// In a real implementation, you would:
+	// 1. Check file size and format
+	// 2. Verify checksums
+	// 3. Test restore to a temporary database
+	// 4. Run basic queries to ensure data integrity
+	
+	// Simulate backup verification
+	time.Sleep(2 * time.Second)
+	
+	return nil
+}
+
+// cleanupOldBackups removes backup files older than retention period
+func (j *BackupJob) cleanupOldBackups(ctx context.Context) error {
+	j.logger.Info("Cleaning up old backup files")
+	
+	// In a real implementation, you would:
+	// 1. List backup files in the backup directory
+	// 2. Check file modification times
+	// 3. Remove files older than retention period (e.g., 30 days)
+	// 4. Update backup inventory/catalog
+	
+	// Example retention policy: keep backups for 30 days
+	retentionPeriod := 30 * 24 * time.Hour
+	cutoffTime := time.Now().Add(-retentionPeriod)
+	
+	j.logger.Info("Backup cleanup completed", "cutoff_time", cutoffTime)
+	
+	return nil
+}
+
+// ID returns the job identifier
+func (j *BackupJob) ID() string {
+	return "backup-job"
+}
+
+// RetryPolicy returns the retry policy for this job
+func (j *BackupJob) RetryPolicy() jobs.RetryPolicy {
+	return jobs.RetryPolicy{
+		MaxRetries:      2,
+		InitialInterval: 5 * time.Minute,
+		MaxInterval:     30 * time.Minute,
+		Multiplier:      2.0,
+	}
+}

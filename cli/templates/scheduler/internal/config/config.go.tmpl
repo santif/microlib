@@ -1,0 +1,24 @@
+package config
+
+import (
+	"github.com/santif/microlib/observability"
+	"github.com/santif/microlib/http"
+	"github.com/santif/microlib/data"
+	"github.com/santif/microlib/jobs"
+)
+
+// Config represents the scheduler service configuration
+type Config struct {
+	Service       ServiceConfig              `yaml:"service" validate:"required"`
+	HTTP          http.Config                `yaml:"http" validate:"required"`
+	Database      data.PostgresConfig        `yaml:"database" validate:"required"`
+	Jobs          jobs.Config                `yaml:"jobs" validate:"required"`
+	Logging       observability.LogConfig    `yaml:"logging" validate:"required"`
+	Observability observability.Config       `yaml:"observability" validate:"required"`
+}
+
+// ServiceConfig contains service-specific configuration
+type ServiceConfig struct {
+	Instance  string `yaml:"instance" validate:"required"`
+	BuildHash string `yaml:"build_hash"`
+}

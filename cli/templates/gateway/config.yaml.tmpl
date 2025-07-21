@@ -1,0 +1,105 @@
+service:
+  instance: "{{.ServiceName}}-1"
+  build_hash: "${BUILD_HASH:-dev}"
+
+http:
+  port: 8080
+  host: "0.0.0.0"
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+
+cache:
+  host: "${REDIS_HOST:-localhost}"
+  port: ${REDIS_PORT:-6379}
+  password: "${REDIS_PASSWORD:-}"
+  database: ${REDIS_DB:-0}
+  max_retries: 3
+  pool_size: 10
+
+gateway:
+  routes:
+    - path: "/api/v1/users"
+      method: "GET"
+      target: "http://user-service:8080/api/v1/users"
+      strip_prefix: false
+      auth:
+        required: true
+        roles: ["user", "admin"]
+    - path: "/api/v1/users"
+      method: "POST"
+      target: "http://user-service:8080/api/v1/users"
+      strip_prefix: false
+      auth:
+        required: true
+        roles: ["admin"]
+    - path: "/api/v1/orders"
+      method: "GET"
+      target: "http://order-service:8080/api/v1/orders"
+      strip_prefix: false
+      auth:
+        required: true
+        roles: ["user", "admin"]
+    - path: "/health"
+      method: "GET"
+      target: "http://localhost:8080/health"
+      strip_prefix: false
+      auth:
+        required: false
+
+  rate_limit:
+    enabled: true
+    requests_per_minute: 100
+    burst_size: 20
+    window_size: 60s
+
+  auth:
+    enabled: true
+    jwks_url: "${JWKS_URL:-https://your-auth-provider.com/.well-known/jwks.json}"
+    issuer: "${JWT_ISSUER:-https://your-auth-provider.com}"
+    audience: "${JWT_AUDIENCE:-your-api}"
+
+  cors:
+    enabled: true
+    allowed_origins:
+      - "http://localhost:3000"
+      - "https://your-frontend.com"
+    allowed_methods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "OPTIONS"
+    allowed_headers:
+      - "Content-Type"
+      - "Authorization"
+      - "X-Requested-With"
+    exposed_headers:
+      - "X-Total-Count"
+    allow_credentials: true
+    max_age: 86400
+
+  timeout:
+    read: 30s
+    write: 30s
+    idle: 120s
+    handler: 60s
+
+logging:
+  level: "${LOG_LEVEL:-info}"
+  format: "${LOG_FORMAT:-json}"
+  add_source: false
+
+observability:
+  service_name: "{{.ServiceName}}"
+  service_version: "1.0.0"
+  metrics:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+  tracing:
+    enabled: true
+    endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4317}"
+    sample_rate: 0.1
+  health:
+    enabled: true

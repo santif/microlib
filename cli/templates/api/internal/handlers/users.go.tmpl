@@ -1,0 +1,123 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"{{.ModuleName}}/internal/models"
+)
+
+// UsersHandler handles requests to /api/v1/users
+func (h *Handlers) UsersHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.listUsers(w, r)
+	case http.MethodPost:
+		h.createUser(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// UserHandler handles requests to /api/v1/users/{id}
+func (h *Handlers) UserHandler(w http.ResponseWriter, r *http.Request) {
+	// Extract user ID from path
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/users/")
+	userID, err := strconv.ParseInt(path, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		h.getUser(w, r, userID)
+	case http.MethodPut:
+		h.updateUser(w, r, userID)
+	case http.MethodDelete:
+		h.deleteUser(w, r, userID)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// listUsers handles GET /api/v1/users
+func (h *Handlers) listUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := h.userService.ListUsers(r.Context())
+	if err != nil {
+		h.logger.Error("Failed to list users", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"users": users,
+		"count": len(users),
+	})
+}
+
+// createUser handles POST /api/v1/users
+func (h *Handlers) createUser(w http.ResponseWriter, r *http.Request) {
+	var req models.CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.userService.CreateUser(r.Context(), req)
+	if err != nil {
+		h.logger.Error("Failed to create user", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(user)
+}
+
+// getUser handles GET /api/v1/users/{id}
+func (h *Handlers) getUser(w http.ResponseWriter, r *http.Request, userID int64) {
+	user, err := h.userService.GetUser(r.Context(), userID)
+	if err != nil {
+		h.logger.Error("Failed to get user", "error", err, "user_id", userID)
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+// updateUser handles PUT /api/v1/users/{id}
+func (h *Handlers) updateUser(w http.ResponseWriter, r *http.Request, userID int64) {
+	var req models.UpdateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.userService.UpdateUser(r.Context(), userID, req)
+	if err != nil {
+		h.logger.Error("Failed to update user", "error", err, "user_id", userID)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+// deleteUser handles DELETE /api/v1/users/{id}
+func (h *Handlers) deleteUser(w http.ResponseWriter, r *http.Request, userID int64) {
+	if err := h.userService.DeleteUser(r.Context(), userID); err != nil {
+		h.logger.Error("Failed to delete user", "error", err, "user_id", userID)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

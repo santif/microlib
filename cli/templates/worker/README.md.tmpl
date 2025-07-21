@@ -1,0 +1,297 @@
+# {{.ServiceNameCap}} Worker Service
+
+A MicroLib-based background worker service for {{.ServiceName}}.
+
+## Features
+
+- ✅ Background job processing with queue management
+- ✅ Structured logging with slog and trace correlation
+- ✅ Prometheus metrics collection
+- ✅ OpenTelemetry distributed tracing
+- ✅ Health checks (liveness, readiness, startup)
+- ✅ Graceful shutdown with job completion
+- ✅ PostgreSQL database integration with connection pooling
+{{- if .WithMessaging}}
+- ✅ Event-driven architecture with messaging
+{{- end}}
+- ✅ Retry policies with exponential backoff
+- ✅ Dead letter queue for failed jobs
+- ✅ Configuration management with validation
+- ✅ Docker and Docker Compose support
+- ✅ Comprehensive test suite
+
+## Job Types
+
+### Email Processing Jobs
+- Email notification sending
+- Bulk email campaigns
+- Email template rendering
+
+### Image Processing Jobs
+- Image resizing and compression
+- Thumbnail generation
+- Watermark application
+- Format conversion
+
+### Notification Jobs
+- Push notifications
+- SMS notifications
+- In-app notifications
+
+## Quick Start
+
+### Prerequisites
+
+- Go {{.GoVersion}} or later
+- PostgreSQL 13+
+{{- if .WithMessaging}}
+- RabbitMQ 3.8+ or Kafka 2.8+
+{{- end}}
+- Docker and Docker Compose (optional)
+
+### Development Setup
+
+1. **Clone and setup**
+   ```bash
+   git clone <your-repo>
+   cd {{.ServiceName}}
+   make deps
+   ```
+
+2. **Start dependencies**
+   ```bash
+   docker-compose up postgres{{if .WithMessaging}} rabbitmq{{end}} -d
+   ```
+
+3. **Run migrations**
+   ```bash
+   make build
+   make migrate-up
+   ```
+
+4. **Start the worker**
+   ```bash
+   make run
+   ```
+
+The worker will start processing jobs from the queue.
+
+### Docker Setup
+
+```bash
+# Build and run everything
+make docker-run
+
+# Or manually
+docker-compose up --build
+```
+
+## Configuration
+
+Configuration is loaded from multiple sources in order of priority:
+1. Environment variables
+2. `config.yaml` file
+3. Command line flags
+
+### Environment Variables
+
+```bash
+# Service
+SERVICE_INSTANCE={{.ServiceName}}-worker-1
+SERVICE_BUILD_HASH=abc123
+
+# HTTP Server (for health checks)
+HTTP_PORT=8080
+HTTP_HOST=0.0.0.0
+
+# Database
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_NAME={{.ServiceName}}_db
+
+# Job Queue
+JOBS_QUEUE_TYPE=postgres
+JOBS_MAX_WORKERS=10
+JOBS_POLL_INTERVAL=5s
+
+{{- if .WithMessaging}}
+# Messaging
+MESSAGING_BROKER_TYPE=rabbitmq
+RABBITMQ_URL=amqp://guest:guest@localhost:5672/
+{{- end}}
+
+# Logging
+LOG_LEVEL=info
+LOG_FORMAT=json
+```
+
+## Development
+
+### Available Commands
+
+```bash
+make help          # Show available commands
+make build         # Build the application
+make test          # Run tests with coverage
+make run           # Run the worker
+make lint          # Lint the code
+make format        # Format the code
+make clean         # Clean build artifacts
+make docker-build  # Build Docker image
+make docker-run    # Run with Docker Compose
+make migrate-up    # Apply database migrations
+make migrate-down  # Rollback database migrations
+make seed          # Apply database seeds
+```
+
+### Project Structure
+
+```
+{{.ServiceName}}/
+├── cmd/                    # Application commands
+│   └── worker.go          # Main worker command
+├── internal/
+│   ├── config/            # Configuration structures
+│   ├── handlers/          # HTTP handlers (health checks)
+│   ├── jobs/              # Job implementations
+│   │   ├── email_job.go   # Email processing jobs
+│   │   └── image_processor.go # Image processing jobs
+│   └── services/          # Business logic layer
+│       └── notification_service.go # Notification service
+├── migrations/            # Database migrations
+├── main.go               # Application entry point
+├── config.yaml           # Default configuration
+├── Dockerfile            # Docker image definition
+├── docker-compose.yml    # Local development setup
+└── Makefile              # Build automation
+```
+
+### Adding New Job Types
+
+1. **Create Job Handler**: Add new job handler in `internal/jobs/`
+2. **Implement Job Interface**: Ensure your job implements the `Job` interface
+3. **Register Job**: Register the job type in the worker startup
+4. **Add Tests**: Create comprehensive tests for your job logic
+
+### Example Job Implementation
+
+```go
+package jobs
+
+import (
+    "context"
+    "log/slog"
+    "time"
+    
+    "github.com/santif/microlib/jobs"
+)
+
+type CustomJob struct {
+    logger *slog.Logger
+    // Add your dependencies
+}
+
+func (j *CustomJob) Execute(ctx context.Context) error {
+    j.logger.Info("Executing custom job")
+    
+    // Your job logic here
+    
+    return nil
+}
+
+func (j *CustomJob) ID() string {
+    return "custom-job"
+}
+
+func (j *CustomJob) RetryPolicy() jobs.RetryPolicy {
+    return jobs.RetryPolicy{
+        MaxRetries:      3,
+        InitialInterval: 30 * time.Second,
+        MaxInterval:     5 * time.Minute,
+        Multiplier:      2.0,
+    }
+}
+```
+
+## Job Queue Management
+
+### Enqueuing Jobs
+
+```go
+// Enqueue a job programmatically
+jobQueue.Enqueue(ctx, &EmailJob{
+    To:      "user@example.com",
+    Subject: "Welcome!",
+    Body:    "Welcome to our service!",
+})
+```
+
+### Monitoring Jobs
+
+- **Metrics**: Available at `/metrics` endpoint
+- **Health**: Available at `/health` endpoints
+- **Logs**: Structured JSON logs with job correlation
+
+### Key Metrics
+
+- `jobs_processed_total` - Total jobs processed by type and status
+- `jobs_duration_seconds` - Job processing duration histogram
+- `jobs_queue_size` - Current queue size by job type
+- `jobs_retry_attempts_total` - Total retry attempts by job type
+
+## Testing
+
+```bash
+# Run all tests
+make test
+
+# Run tests with verbose output
+go test -v ./...
+
+# Run tests for specific package
+go test -v ./internal/jobs
+
+# Run tests with race detection
+go test -race ./...
+
+# Run integration tests
+go test -tags=integration ./...
+```
+
+## Deployment
+
+### Docker
+
+```bash
+# Build image
+make docker-build
+
+# Run with compose
+make docker-run
+```
+
+### Kubernetes
+
+See `deployments/` directory for Kubernetes manifests.
+
+## Monitoring and Observability
+
+- **Metrics**: Available at `/metrics` endpoint (Prometheus format)
+- **Health**: Available at `/health` endpoints for Kubernetes probes
+- **Tracing**: OpenTelemetry traces sent to configured endpoint
+- **Logs**: Structured JSON logs with job correlation
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Run `make test lint`
+6. Submit a pull request
+
+## License
+
+{{.License}}

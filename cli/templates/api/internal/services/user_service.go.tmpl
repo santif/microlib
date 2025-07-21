@@ -1,0 +1,318 @@
+package services
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	{{- if .WithCache}}
+	"github.com/santif/microlib/data"
+	{{- end}}
+	{{- if .WithMessaging}}
+	"github.com/santif/microlib/messaging"
+	{{- end}}
+
+	"{{.ModuleName}}/internal/models"
+	"{{.ModuleName}}/internal/repositories"
+)
+
+// UserService handles user business logic
+type UserService struct {
+	logger   *slog.Logger
+	userRepo *repositories.UserRepository
+	{{- if .WithCache}}
+	cache    data.Cache
+	{{- end}}
+	{{- if .WithMessaging}}
+	broker   messaging.Broker
+	{{- end}}
+}
+
+// UserServiceConfig contains dependencies for UserService
+type UserServiceConfig struct {
+	Logger   *slog.Logger
+	UserRepo *repositories.UserRepository
+	{{- if .WithCache}}
+	Cache    data.Cache
+	{{- end}}
+	{{- if .WithMessaging}}
+	Broker   messaging.Broker
+	{{- end}}
+}
+
+// NewUserService creates a new UserService
+func NewUserService(cfg UserServiceConfig) *UserService {
+	return &UserService{
+		logger:   cfg.Logger,
+		userRepo: cfg.UserRepo,
+		{{- if .WithCache}}
+		cache:    cfg.Cache,
+		{{- end}}
+		{{- if .WithMessaging}}
+		broker:   cfg.Broker,
+		{{- end}}
+	}
+}
+
+// ListUsers retrieves all users
+func (s *UserService) ListUsers(ctx context.Context) ([]models.User, error) {
+	s.logger.Info("Listing users")
+
+	{{- if .WithCache}}
+	// Try to get from cache first
+	if users, err := s.getUsersFromCache(ctx); err == nil {
+		s.logger.Debug("Users retrieved from cache")
+		return users, nil
+	}
+	{{- end}}
+
+	users, err := s.userRepo.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing users: %w", err)
+	}
+
+	{{- if .WithCache}}
+	// Cache the results
+	if err := s.cacheUsers(ctx, users); err != nil {
+		s.logger.Warn("Failed to cache users", "error", err)
+	}
+	{{- end}}
+
+	return users, nil
+}
+
+// GetUser retrieves a user by ID
+func (s *UserService) GetUser(ctx context.Context, id int64) (*models.User, error) {
+	s.logger.Info("Getting user", "user_id", id)
+
+	{{- if .WithCache}}
+	// Try to get from cache first
+	if user, err := s.getUserFromCache(ctx, id); err == nil {
+		s.logger.Debug("User retrieved from cache", "user_id", id)
+		return user, nil
+	}
+	{{- end}}
+
+	user, err := s.userRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("getting user %d: %w", id, err)
+	}
+
+	{{- if .WithCache}}
+	// Cache the result
+	if err := s.cacheUser(ctx, user); err != nil {
+		s.logger.Warn("Failed to cache user", "error", err, "user_id", id)
+	}
+	{{- end}}
+
+	return user, nil
+}
+
+// CreateUser creates a new user
+func (s *UserService) CreateUser(ctx context.Context, req models.CreateUserRequest) (*models.User, error) {
+	s.logger.Info("Creating user", "email", req.Email)
+
+	// Validate request
+	if err := s.validateCreateUserRequest(req); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+
+	// Check if user already exists
+	if exists, err := s.userRepo.ExistsByEmail(ctx, req.Email); err != nil {
+		return nil, fmt.Errorf("checking user existence: %w", err)
+	} else if exists {
+		return nil, fmt.Errorf("user with email %s already exists", req.Email)
+	}
+
+	// Create user
+	user := &models.User{
+		Email:     req.Email,
+		Name:      req.Name,
+		Active:    true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	if err := s.userRepo.Create(ctx, user); err != nil {
+		return nil, fmt.Errorf("creating user: %w", err)
+	}
+
+	{{- if .WithMessaging}}
+	// Publish user created event
+	if err := s.publishUserCreatedEvent(ctx, user); err != nil {
+		s.logger.Warn("Failed to publish user created event", "error", err, "user_id", user.ID)
+	}
+	{{- end}}
+
+	{{- if .WithCache}}
+	// Cache the new user
+	if err := s.cacheUser(ctx, user); err != nil {
+		s.logger.Warn("Failed to cache new user", "error", err, "user_id", user.ID)
+	}
+	{{- end}}
+
+	s.logger.Info("User created successfully", "user_id", user.ID, "email", user.Email)
+	return user, nil
+}
+
+// UpdateUser updates an existing user
+func (s *UserService) UpdateUser(ctx context.Context, id int64, req models.UpdateUserRequest) (*models.User, error) {
+	s.logger.Info("Updating user", "user_id", id)
+
+	// Get existing user
+	user, err := s.GetUser(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply updates
+	if req.Email != nil {
+		user.Email = *req.Email
+	}
+	if req.Name != nil {
+		user.Name = *req.Name
+	}
+	if req.Active != nil {
+		user.Active = *req.Active
+	}
+	user.UpdatedAt = time.Now()
+
+	// Update in database
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return nil, fmt.Errorf("updating user: %w", err)
+	}
+
+	{{- if .WithMessaging}}
+	// Publish user updated event
+	if err := s.publishUserUpdatedEvent(ctx, user); err != nil {
+		s.logger.Warn("Failed to publish user updated event", "error", err, "user_id", user.ID)
+	}
+	{{- end}}
+
+	{{- if .WithCache}}
+	// Update cache
+	if err := s.cacheUser(ctx, user); err != nil {
+		s.logger.Warn("Failed to update user cache", "error", err, "user_id", user.ID)
+	}
+	{{- end}}
+
+	s.logger.Info("User updated successfully", "user_id", user.ID)
+	return user, nil
+}
+
+// DeleteUser deletes a user
+func (s *UserService) DeleteUser(ctx context.Context, id int64) error {
+	s.logger.Info("Deleting user", "user_id", id)
+
+	// Check if user exists
+	if _, err := s.GetUser(ctx, id); err != nil {
+		return err
+	}
+
+	// Delete from database
+	if err := s.userRepo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("deleting user: %w", err)
+	}
+
+	{{- if .WithMessaging}}
+	// Publish user deleted event
+	if err := s.publishUserDeletedEvent(ctx, id); err != nil {
+		s.logger.Warn("Failed to publish user deleted event", "error", err, "user_id", id)
+	}
+	{{- end}}
+
+	{{- if .WithCache}}
+	// Remove from cache
+	if err := s.removeUserFromCache(ctx, id); err != nil {
+		s.logger.Warn("Failed to remove user from cache", "error", err, "user_id", id)
+	}
+	{{- end}}
+
+	s.logger.Info("User deleted successfully", "user_id", id)
+	return nil
+}
+
+// validateCreateUserRequest validates a create user request
+func (s *UserService) validateCreateUserRequest(req models.CreateUserRequest) error {
+	if req.Email == "" {
+		return fmt.Errorf("email is required")
+	}
+	if req.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if len(req.Name) < 2 || len(req.Name) > 100 {
+		return fmt.Errorf("name must be between 2 and 100 characters")
+	}
+	return nil
+}
+
+{{- if .WithCache}}
+// Cache-related methods
+func (s *UserService) getUserFromCache(ctx context.Context, id int64) (*models.User, error) {
+	// Implementation would depend on your cache serialization strategy
+	// This is a placeholder
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (s *UserService) getUsersFromCache(ctx context.Context) ([]models.User, error) {
+	// Implementation would depend on your cache serialization strategy
+	// This is a placeholder
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (s *UserService) cacheUser(ctx context.Context, user *models.User) error {
+	// Implementation would depend on your cache serialization strategy
+	// This is a placeholder
+	return nil
+}
+
+func (s *UserService) cacheUsers(ctx context.Context, users []models.User) error {
+	// Implementation would depend on your cache serialization strategy
+	// This is a placeholder
+	return nil
+}
+
+func (s *UserService) removeUserFromCache(ctx context.Context, id int64) error {
+	// Implementation would depend on your cache serialization strategy
+	// This is a placeholder
+	return nil
+}
+{{- end}}
+
+{{- if .WithMessaging}}
+// Messaging-related methods
+func (s *UserService) publishUserCreatedEvent(ctx context.Context, user *models.User) error {
+	event := map[string]interface{}{
+		"event_type": "user.created",
+		"user_id":    user.ID,
+		"email":      user.Email,
+		"name":       user.Name,
+		"timestamp":  time.Now(),
+	}
+
+	return s.broker.Publish(ctx, "user.events", messaging.NewMessage(event))
+}
+
+func (s *UserService) publishUserUpdatedEvent(ctx context.Context, user *models.User) error {
+	event := map[string]interface{}{
+		"event_type": "user.updated",
+		"user_id":    user.ID,
+		"email":      user.Email,
+		"name":       user.Name,
+		"timestamp":  time.Now(),
+	}
+
+	return s.broker.Publish(ctx, "user.events", messaging.NewMessage(event))
+}
+
+func (s *UserService) publishUserDeletedEvent(ctx context.Context, userID int64) error {
+	event := map[string]interface{}{
+		"event_type": "user.deleted",
+		"user_id":    userID,
+		"timestamp":  time.Now(),
+	}
+
+	return s.broker.Publish(ctx, "user.events", messaging.NewMessage(event))
+}
+{{- end}}

@@ -1,0 +1,187 @@
+package jobs
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/santif/microlib/data"
+	"github.com/santif/microlib/jobs"
+)
+
+// ImageProcessorJob handles image processing tasks
+type ImageProcessorJob struct {
+	logger *slog.Logger
+	db     data.Database
+}
+
+// ImageProcessingRequest represents an image processing request
+type ImageProcessingRequest struct {
+	ImageID     string            `json:"image_id"`
+	ImageURL    string            `json:"image_url"`
+	Operations  []string          `json:"operations"`
+	OutputPath  string            `json:"output_path"`
+	Metadata    map[string]string `json:"metadata"`
+}
+
+// NewImageProcessorJob creates a new image processor job
+func NewImageProcessorJob(logger *slog.Logger, db data.Database) *ImageProcessorJob {
+	return &ImageProcessorJob{
+		logger: logger,
+		db:     db,
+	}
+}
+
+// Execute processes an image according to the request
+func (j *ImageProcessorJob) Execute(ctx context.Context, request ImageProcessingRequest) error {
+	j.logger.Info("Starting image processing",
+		"image_id", request.ImageID,
+		"operations", request.Operations,
+	)
+
+	// Update job status to processing
+	if err := j.updateImageStatus(ctx, request.ImageID, "processing"); err != nil {
+		return fmt.Errorf("updating image status: %w", err)
+	}
+
+	// Process each operation
+	for _, operation := range request.Operations {
+		if err := j.processOperation(ctx, request, operation); err != nil {
+			j.logger.Error("Failed to process operation",
+				"image_id", request.ImageID,
+				"operation", operation,
+				"error", err,
+			)
+			
+			// Update status to failed
+			j.updateImageStatus(ctx, request.ImageID, "failed")
+			return fmt.Errorf("processing operation %s: %w", operation, err)
+		}
+	}
+
+	// Update job status to completed
+	if err := j.updateImageStatus(ctx, request.ImageID, "completed"); err != nil {
+		return fmt.Errorf("updating final image status: %w", err)
+	}
+
+	j.logger.Info("Image processing completed successfully",
+		"image_id", request.ImageID,
+		"output_path", request.OutputPath,
+	)
+
+	return nil
+}
+
+// processOperation processes a single image operation
+func (j *ImageProcessorJob) processOperation(ctx context.Context, request ImageProcessingRequest, operation string) error {
+	j.logger.Info("Processing operation",
+		"image_id", request.ImageID,
+		"operation", operation,
+	)
+
+	switch operation {
+	case "resize":
+		return j.resizeImage(ctx, request)
+	case "compress":
+		return j.compressImage(ctx, request)
+	case "watermark":
+		return j.addWatermark(ctx, request)
+	case "thumbnail":
+		return j.generateThumbnail(ctx, request)
+	default:
+		return fmt.Errorf("unknown operation: %s", operation)
+	}
+}
+
+// resizeImage resizes an image
+func (j *ImageProcessorJob) resizeImage(ctx context.Context, request ImageProcessingRequest) error {
+	j.logger.Info("Resizing image", "image_id", request.ImageID)
+	
+	// Simulate image resizing work
+	time.Sleep(2 * time.Second)
+	
+	// In a real implementation, you would:
+	// 1. Download the image from request.ImageURL
+	// 2. Use an image processing library (like imaging or gg)
+	// 3. Resize the image according to metadata parameters
+	// 4. Save the resized image to request.OutputPath
+	
+	return nil
+}
+
+// compressImage compresses an image
+func (j *ImageProcessorJob) compressImage(ctx context.Context, request ImageProcessingRequest) error {
+	j.logger.Info("Compressing image", "image_id", request.ImageID)
+	
+	// Simulate image compression work
+	time.Sleep(1 * time.Second)
+	
+	// In a real implementation, you would:
+	// 1. Load the image
+	// 2. Apply compression algorithms
+	// 3. Save the compressed image
+	
+	return nil
+}
+
+// addWatermark adds a watermark to an image
+func (j *ImageProcessorJob) addWatermark(ctx context.Context, request ImageProcessingRequest) error {
+	j.logger.Info("Adding watermark", "image_id", request.ImageID)
+	
+	// Simulate watermark addition work
+	time.Sleep(1500 * time.Millisecond)
+	
+	// In a real implementation, you would:
+	// 1. Load the image and watermark
+	// 2. Composite the watermark onto the image
+	// 3. Save the watermarked image
+	
+	return nil
+}
+
+// generateThumbnail generates a thumbnail for an image
+func (j *ImageProcessorJob) generateThumbnail(ctx context.Context, request ImageProcessingRequest) error {
+	j.logger.Info("Generating thumbnail", "image_id", request.ImageID)
+	
+	// Simulate thumbnail generation work
+	time.Sleep(500 * time.Millisecond)
+	
+	// In a real implementation, you would:
+	// 1. Load the image
+	// 2. Create a smaller version (thumbnail)
+	// 3. Save the thumbnail
+	
+	return nil
+}
+
+// updateImageStatus updates the processing status of an image
+func (j *ImageProcessorJob) updateImageStatus(ctx context.Context, imageID, status string) error {
+	query := `
+		UPDATE image_processing_jobs 
+		SET status = $1, updated_at = NOW() 
+		WHERE image_id = $2
+	`
+	
+	_, err := j.db.Exec(ctx, query, status, imageID)
+	if err != nil {
+		return fmt.Errorf("updating image status in database: %w", err)
+	}
+	
+	return nil
+}
+
+// ID returns the job identifier
+func (j *ImageProcessorJob) ID() string {
+	return "image-processor-job"
+}
+
+// RetryPolicy returns the retry policy for this job
+func (j *ImageProcessorJob) RetryPolicy() jobs.RetryPolicy {
+	return jobs.RetryPolicy{
+		MaxRetries:      3,
+		InitialInterval: 30 * time.Second,
+		MaxInterval:     5 * time.Minute,
+		Multiplier:      2.0,
+	}
+}

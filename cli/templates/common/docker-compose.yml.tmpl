@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  {{.ServiceName}}:
+    build: .
+    ports:
+      - "8080:8080"
+      {{- if .WithGRPC}}
+      - "9090:9090"
+      {{- end}}
+    environment:
+      {{- if or (eq .ServiceType "api") (eq .ServiceType "event") (eq .ServiceType "worker") (eq .ServiceType "scheduler")}}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME={{.ServiceName}}_db
+      {{- end}}
+      {{- if .WithCache}}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      {{- end}}
+      {{- if .WithMessaging}}
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - KAFKA_BROKERS=kafka:9092
+      {{- end}}
+    depends_on:
+      {{- if or (eq .ServiceType "api") (eq .ServiceType "event") (eq .ServiceType "worker") (eq .ServiceType "scheduler")}}
+      - postgres
+      {{- end}}
+      {{- if .WithCache}}
+      - redis
+      {{- end}}
+      {{- if .WithMessaging}}
+      - rabbitmq
+      - kafka
+      {{- end}}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  {{- if or (eq .ServiceType "api") (eq .ServiceType "event") (eq .ServiceType "worker") (eq .ServiceType "scheduler")}}
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB={{.ServiceName}}_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  {{- end}}
+
+  {{- if .WithCache}}
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+  {{- end}}
+
+  {{- if .WithMessaging}}
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    restart: unless-stopped
+  {{- end}}
+
+volumes:
+  {{- if or (eq .ServiceType "api") (eq .ServiceType "event") (eq .ServiceType "worker") (eq .ServiceType "scheduler")}}
+  postgres_data:
+  {{- end}}
+  {{- if .WithCache}}
+  redis_data:
+  {{- end}}
+  {{- if .WithMessaging}}
+  rabbitmq_data:
+  kafka_data:
+  {{- end}}

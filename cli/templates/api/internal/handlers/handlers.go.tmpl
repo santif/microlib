@@ -1,0 +1,73 @@
+package handlers
+
+import (
+	"log/slog"
+	"net/http"
+
+	httplib "github.com/santif/microlib/http"
+	{{- if .WithGRPC}}
+	grpclib "github.com/santif/microlib/grpc"
+	{{- end}}
+	{{- if .WithMessaging}}
+	"github.com/santif/microlib/messaging"
+	{{- end}}
+
+	"{{.ModuleName}}/internal/services"
+)
+
+// Handlers contains all HTTP and gRPC handlers
+type Handlers struct {
+	logger      *slog.Logger
+	userService *services.UserService
+	{{- if .WithMessaging}}
+	broker      messaging.Broker
+	{{- end}}
+}
+
+// Config contains handler dependencies
+type Config struct {
+	Logger      *slog.Logger
+	UserService *services.UserService
+	{{- if .WithMessaging}}
+	Broker      messaging.Broker
+	{{- end}}
+}
+
+// New creates a new handlers instance
+func New(cfg Config) *Handlers {
+	return &Handlers{
+		logger:      cfg.Logger,
+		userService: cfg.UserService,
+		{{- if .WithMessaging}}
+		broker:      cfg.Broker,
+		{{- end}}
+	}
+}
+
+// RegisterHTTPRoutes registers all HTTP routes
+func (h *Handlers) RegisterHTTPRoutes(server httplib.Server) {
+	// Health endpoints
+	server.RegisterHandler("/health", http.HandlerFunc(h.HealthHandler))
+	server.RegisterHandler("/health/live", http.HandlerFunc(h.LivenessHandler))
+	server.RegisterHandler("/health/ready", http.HandlerFunc(h.ReadinessHandler))
+
+	// API routes
+	server.RegisterHandler("/api/v1/users", http.HandlerFunc(h.UsersHandler))
+	server.RegisterHandler("/api/v1/users/{id}", http.HandlerFunc(h.UserHandler))
+	server.RegisterHandler("/api/v1/ping", http.HandlerFunc(h.PingHandler))
+}
+
+{{- if .WithGRPC}}
+// RegisterGRPCServices registers all gRPC services
+func (h *Handlers) RegisterGRPCServices(server grpclib.Server) {
+	// Register your gRPC services here
+	// Example: pb.RegisterUserServiceServer(server, h)
+}
+{{- end}}
+
+// PingHandler handles ping requests
+func (h *Handlers) PingHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"message": "pong", "service": "{{.ServiceName}}"}`))
+}

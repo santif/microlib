@@ -1,0 +1,197 @@
+package jobs
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/santif/microlib/data"
+)
+
+// ReportJob generates daily/weekly/monthly reports
+type ReportJob struct {
+	logger     *slog.Logger
+	db         data.Database
+	reportType string
+}
+
+// NewReportJob creates a new report job
+func NewReportJob(logger *slog.Logger, db data.Database, reportType string) *ReportJob {
+	return &ReportJob{
+		logger:     logger,
+		db:         db,
+		reportType: reportType,
+	}
+}
+
+// Execute runs the report generation job
+func (j *ReportJob) Execute(ctx context.Context) error {
+	j.logger.Info("Starting report generation", "type", j.reportType)
+	
+	switch j.reportType {
+	case "daily":
+		return j.generateDailyReport(ctx)
+	case "weekly":
+		return j.generateWeeklyReport(ctx)
+	case "monthly":
+		return j.generateMonthlyReport(ctx)
+	default:
+		return fmt.Errorf("unknown report type: %s", j.reportType)
+	}
+}
+
+// generateDailyReport generates a daily activity report
+func (j *ReportJob) generateDailyReport(ctx context.Context) error {
+	j.logger.Info("Generating daily report")
+	
+	// Get yesterday's date range
+	yesterday := time.Now().AddDate(0, 0, -1)
+	startOfDay := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, yesterday.Location())
+	endOfDay := startOfDay.Add(24 * time.Hour)
+	
+	// Example: Get user activity stats
+	query := `
+		SELECT 
+			COUNT(*) as total_users,
+			COUNT(CASE WHEN last_login >= $1 THEN 1 END) as active_users
+		FROM users 
+		WHERE created_at <= $2
+	`
+	
+	var totalUsers, activeUsers int
+	err := j.db.QueryRow(ctx, query, startOfDay, endOfDay).Scan(&totalUsers, &activeUsers)
+	if err != nil {
+		return fmt.Errorf("querying user stats: %w", err)
+	}
+	
+	// Example: Get transaction stats
+	query = `
+		SELECT 
+			COUNT(*) as total_transactions,
+			COALESCE(SUM(amount), 0) as total_amount
+		FROM transactions 
+		WHERE created_at >= $1 AND created_at < $2
+	`
+	
+	var totalTransactions int
+	var totalAmount float64
+	err = j.db.QueryRow(ctx, query, startOfDay, endOfDay).Scan(&totalTransactions, &totalAmount)
+	if err != nil {
+		return fmt.Errorf("querying transaction stats: %w", err)
+	}
+	
+	// Log the report (in a real implementation, you might send this via email or save to a file)
+	j.logger.Info("Daily report generated",
+		"date", startOfDay.Format("2006-01-02"),
+		"total_users", totalUsers,
+		"active_users", activeUsers,
+		"total_transactions", totalTransactions,
+		"total_amount", totalAmount,
+	)
+	
+	// TODO: Send report via email, save to file, or store in database
+	
+	return nil
+}
+
+// generateWeeklyReport generates a weekly summary report
+func (j *ReportJob) generateWeeklyReport(ctx context.Context) error {
+	j.logger.Info("Generating weekly report")
+	
+	// Get last week's date range
+	now := time.Now()
+	startOfWeek := now.AddDate(0, 0, -7)
+	
+	// Example weekly metrics query
+	query := `
+		SELECT 
+			DATE(created_at) as date,
+			COUNT(*) as daily_count
+		FROM user_activities 
+		WHERE created_at >= $1 AND created_at < $2
+		GROUP BY DATE(created_at)
+		ORDER BY date
+	`
+	
+	rows, err := j.db.Query(ctx, query, startOfWeek, now)
+	if err != nil {
+		return fmt.Errorf("querying weekly stats: %w", err)
+	}
+	defer rows.Close()
+	
+	var weeklyData []struct {
+		Date  time.Time
+		Count int
+	}
+	
+	for rows.Next() {
+		var date time.Time
+		var count int
+		if err := rows.Scan(&date, &count); err != nil {
+			return fmt.Errorf("scanning weekly data: %w", err)
+		}
+		weeklyData = append(weeklyData, struct {
+			Date  time.Time
+			Count int
+		}{date, count})
+	}
+	
+	j.logger.Info("Weekly report generated", "data_points", len(weeklyData))
+	
+	// TODO: Process and send weekly report
+	
+	return nil
+}
+
+// generateMonthlyReport generates a monthly summary report
+func (j *ReportJob) generateMonthlyReport(ctx context.Context) error {
+	j.logger.Info("Generating monthly report")
+	
+	// Get last month's date range
+	now := time.Now()
+	startOfMonth := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, now.Location())
+	endOfMonth := startOfMonth.AddDate(0, 1, 0)
+	
+	// Example: Monthly growth metrics
+	query := `
+		SELECT 
+			COUNT(*) as new_users,
+			COUNT(CASE WHEN status = 'active' THEN 1 END) as active_users,
+			COUNT(CASE WHEN status = 'inactive' THEN 1 END) as inactive_users
+		FROM users 
+		WHERE created_at >= $1 AND created_at < $2
+	`
+	
+	var newUsers, activeUsers, inactiveUsers int
+	err := j.db.QueryRow(ctx, query, startOfMonth, endOfMonth).Scan(&newUsers, &activeUsers, &inactiveUsers)
+	if err != nil {
+		return fmt.Errorf("querying monthly user stats: %w", err)
+	}
+	
+	j.logger.Info("Monthly report generated",
+		"month", startOfMonth.Format("2006-01"),
+		"new_users", newUsers,
+		"active_users", activeUsers,
+		"inactive_users", inactiveUsers,
+	)
+	
+	// TODO: Generate comprehensive monthly report
+	
+	return nil
+}
+
+// ID returns the job identifier
+func (j *ReportJob) ID() string {
+	return fmt.Sprintf("report-job-%s", j.reportType)
+}
+
+// RetryPolicy returns the retry policy for this job
+func (j *ReportJob) RetryPolicy() jobs.RetryPolicy {
+	return jobs.RetryPolicy{
+		MaxRetries:      2,
+		InitialInterval: 5 * time.Minute,
+		MaxInterval:     30 * time.Minute,
+		Multiplier:      2.0,
+	}
+}

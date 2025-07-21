@@ -1,0 +1,251 @@
+package services
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"github.com/santif/microlib/data"
+)
+
+// NotificationService handles notification operations
+type NotificationService struct {
+	logger *slog.Logger
+	db     data.Database
+}
+
+// NotificationConfig contains notification service configuration
+type NotificationConfig struct {
+	Logger *slog.Logger
+	DB     data.Database
+}
+
+// Notification represents a notification to be sent
+type Notification struct {
+	ID       string            `json:"id"`
+	Type     string            `json:"type"`
+	Recipient string           `json:"recipient"`
+	Subject  string            `json:"subject"`
+	Body     string            `json:"body"`
+	Metadata map[string]string `json:"metadata"`
+}
+
+// NewNotificationService creates a new notification service
+func NewNotificationService(cfg NotificationConfig) *NotificationService {
+	return &NotificationService{
+		logger: cfg.Logger,
+		db:     cfg.DB,
+	}
+}
+
+// SendEmail sends an email notification
+func (s *NotificationService) SendEmail(ctx context.Context, notification Notification) error {
+	s.logger.Info("Sending email notification",
+		"notification_id", notification.ID,
+		"recipient", notification.Recipient,
+		"subject", notification.Subject,
+	)
+
+	// Validate email notification
+	if notification.Recipient == "" {
+		return fmt.Errorf("recipient email is required")
+	}
+	if notification.Subject == "" {
+		return fmt.Errorf("email subject is required")
+	}
+
+	// In a real implementation, you would:
+	// 1. Use an email service provider (SendGrid, AWS SES, etc.)
+	// 2. Format the email template
+	// 3. Send the email
+	// 4. Handle delivery status and retries
+
+	// Simulate email sending
+	if err := s.simulateEmailSending(ctx, notification); err != nil {
+		return fmt.Errorf("sending email: %w", err)
+	}
+
+	// Update notification status
+	if err := s.updateNotificationStatus(ctx, notification.ID, "sent"); err != nil {
+		s.logger.Error("Failed to update notification status", "error", err)
+		// Don't return error here as the email was sent successfully
+	}
+
+	s.logger.Info("Email notification sent successfully",
+		"notification_id", notification.ID,
+		"recipient", notification.Recipient,
+	)
+
+	return nil
+}
+
+// SendSMS sends an SMS notification
+func (s *NotificationService) SendSMS(ctx context.Context, notification Notification) error {
+	s.logger.Info("Sending SMS notification",
+		"notification_id", notification.ID,
+		"recipient", notification.Recipient,
+	)
+
+	// Validate SMS notification
+	if notification.Recipient == "" {
+		return fmt.Errorf("recipient phone number is required")
+	}
+	if notification.Body == "" {
+		return fmt.Errorf("SMS body is required")
+	}
+
+	// In a real implementation, you would:
+	// 1. Use an SMS service provider (Twilio, AWS SNS, etc.)
+	// 2. Format the SMS message
+	// 3. Send the SMS
+	// 4. Handle delivery status and retries
+
+	// Simulate SMS sending
+	if err := s.simulateSMSSending(ctx, notification); err != nil {
+		return fmt.Errorf("sending SMS: %w", err)
+	}
+
+	// Update notification status
+	if err := s.updateNotificationStatus(ctx, notification.ID, "sent"); err != nil {
+		s.logger.Error("Failed to update notification status", "error", err)
+	}
+
+	s.logger.Info("SMS notification sent successfully",
+		"notification_id", notification.ID,
+		"recipient", notification.Recipient,
+	)
+
+	return nil
+}
+
+// SendPushNotification sends a push notification
+func (s *NotificationService) SendPushNotification(ctx context.Context, notification Notification) error {
+	s.logger.Info("Sending push notification",
+		"notification_id", notification.ID,
+		"recipient", notification.Recipient,
+	)
+
+	// Validate push notification
+	if notification.Recipient == "" {
+		return fmt.Errorf("recipient device token is required")
+	}
+	if notification.Body == "" {
+		return fmt.Errorf("push notification body is required")
+	}
+
+	// In a real implementation, you would:
+	// 1. Use a push notification service (FCM, APNS, etc.)
+	// 2. Format the push notification payload
+	// 3. Send the notification
+	// 4. Handle delivery status and retries
+
+	// Simulate push notification sending
+	if err := s.simulatePushSending(ctx, notification); err != nil {
+		return fmt.Errorf("sending push notification: %w", err)
+	}
+
+	// Update notification status
+	if err := s.updateNotificationStatus(ctx, notification.ID, "sent"); err != nil {
+		s.logger.Error("Failed to update notification status", "error", err)
+	}
+
+	s.logger.Info("Push notification sent successfully",
+		"notification_id", notification.ID,
+		"recipient", notification.Recipient,
+	)
+
+	return nil
+}
+
+// simulateEmailSending simulates sending an email
+func (s *NotificationService) simulateEmailSending(ctx context.Context, notification Notification) error {
+	// Simulate some processing time
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		// Simulate email provider API call
+		// In reality, this would be replaced with actual email service integration
+	}
+
+	return nil
+}
+
+// simulateSMSSending simulates sending an SMS
+func (s *NotificationService) simulateSMSSending(ctx context.Context, notification Notification) error {
+	// Simulate some processing time
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		// Simulate SMS provider API call
+		// In reality, this would be replaced with actual SMS service integration
+	}
+
+	return nil
+}
+
+// simulatePushSending simulates sending a push notification
+func (s *NotificationService) simulatePushSending(ctx context.Context, notification Notification) error {
+	// Simulate some processing time
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		// Simulate push notification service API call
+		// In reality, this would be replaced with actual push service integration
+	}
+
+	return nil
+}
+
+// updateNotificationStatus updates the status of a notification in the database
+func (s *NotificationService) updateNotificationStatus(ctx context.Context, notificationID, status string) error {
+	query := `
+		UPDATE notifications 
+		SET status = $1, updated_at = NOW() 
+		WHERE id = $2
+	`
+
+	_, err := s.db.Exec(ctx, query, status, notificationID)
+	if err != nil {
+		return fmt.Errorf("updating notification status: %w", err)
+	}
+
+	return nil
+}
+
+// GetNotificationHistory retrieves notification history for a recipient
+func (s *NotificationService) GetNotificationHistory(ctx context.Context, recipient string, limit int) ([]Notification, error) {
+	query := `
+		SELECT id, type, recipient, subject, body, metadata
+		FROM notifications 
+		WHERE recipient = $1 
+		ORDER BY created_at DESC 
+		LIMIT $2
+	`
+
+	rows, err := s.db.Query(ctx, query, recipient, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying notification history: %w", err)
+	}
+	defer rows.Close()
+
+	var notifications []Notification
+	for rows.Next() {
+		var n Notification
+		var metadata []byte
+
+		err := rows.Scan(&n.ID, &n.Type, &n.Recipient, &n.Subject, &n.Body, &metadata)
+		if err != nil {
+			return nil, fmt.Errorf("scanning notification row: %w", err)
+		}
+
+		// In a real implementation, you would unmarshal the metadata JSON
+		// json.Unmarshal(metadata, &n.Metadata)
+
+		notifications = append(notifications, n)
+	}
+
+	return notifications, nil
+}

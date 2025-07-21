@@ -1,5 +1,291 @@
 package cli
 
+import (
+	"embed"
+	"fmt"
+	"io/fs"
+	"strings"
+	"text/template"
+)
+
+//go:embed templates/*
+var templateFS embed.FS
+
+// ServiceType represents different types of services that can be generated
+type ServiceType string
+
+const (
+	ServiceTypeAPI       ServiceType = "api"
+	ServiceTypeWorker    ServiceType = "worker"
+	ServiceTypeScheduler ServiceType = "scheduler"
+	ServiceTypeGateway   ServiceType = "gateway"
+	ServiceTypeEvent     ServiceType = "event"
+)
+
+// TemplateData contains all data needed for template generation
+type TemplateData struct {
+	ServiceName    string
+	ServiceNameCap string
+	ServiceType    ServiceType
+	ModuleName     string
+	Author         string
+	License        string
+	Organization   string
+	GoVersion      string
+	WithGRPC       bool
+	WithJobs       bool
+	WithCache      bool
+	WithAuth       bool
+	WithMessaging  bool
+	WithMetrics    bool
+	WithTracing    bool
+	CustomVars     map[string]string
+}
+
+// ServiceTemplate represents a complete service template
+type ServiceTemplate struct {
+	Type        ServiceType
+	Name        string
+	Description string
+	Files       []TemplateFile
+	Features    []string
+}
+
+// TemplateFile represents a file to be generated from a template
+type TemplateFile struct {
+	Path         string
+	TemplatePath string
+	Condition    func(TemplateData) bool
+}
+
+// GetServiceTemplates returns all available service templates
+func GetServiceTemplates() []ServiceTemplate {
+	return []ServiceTemplate{
+		{
+			Type:        ServiceTypeAPI,
+			Name:        "REST API Service",
+			Description: "A complete REST API service with HTTP endpoints, database, and observability",
+			Features:    []string{"HTTP Server", "Database", "Observability", "Health Checks", "OpenAPI"},
+			Files:       getAPIServiceFiles(),
+		},
+		{
+			Type:        ServiceTypeWorker,
+			Name:        "Background Worker Service",
+			Description: "A worker service for processing background jobs and tasks",
+			Features:    []string{"Job Queue", "Database", "Observability", "Health Checks"},
+			Files:       getWorkerServiceFiles(),
+		},
+		{
+			Type:        ServiceTypeScheduler,
+			Name:        "Scheduled Task Service",
+			Description: "A service for running scheduled tasks and cron jobs",
+			Features:    []string{"Cron Scheduler", "Database", "Observability", "Health Checks"},
+			Files:       getSchedulerServiceFiles(),
+		},
+		{
+			Type:        ServiceTypeGateway,
+			Name:        "API Gateway Service",
+			Description: "An API gateway with routing, authentication, and rate limiting",
+			Features:    []string{"HTTP Server", "gRPC Client", "Authentication", "Rate Limiting", "Observability"},
+			Files:       getGatewayServiceFiles(),
+		},
+		{
+			Type:        ServiceTypeEvent,
+			Name:        "Event-Driven Service",
+			Description: "A service for handling events with messaging and outbox pattern",
+			Features:    []string{"Messaging", "Outbox Pattern", "Database", "Observability", "Health Checks"},
+			Files:       getEventServiceFiles(),
+		},
+	}
+}
+
+// getAPIServiceFiles returns files for API service template
+func getAPIServiceFiles() []TemplateFile {
+	return []TemplateFile{
+		{Path: "go.mod", TemplatePath: "common/go.mod.tmpl"},
+		{Path: "main.go", TemplatePath: "common/main.go.tmpl"},
+		{Path: "cmd/server.go", TemplatePath: "api/cmd/server.go.tmpl"},
+		{Path: "internal/config/config.go", TemplatePath: "api/internal/config/config.go.tmpl"},
+		{Path: "internal/handlers/handlers.go", TemplatePath: "api/internal/handlers/handlers.go.tmpl"},
+		{Path: "internal/handlers/health.go", TemplatePath: "api/internal/handlers/health.go.tmpl"},
+		{Path: "internal/handlers/users.go", TemplatePath: "api/internal/handlers/users.go.tmpl"},
+		{Path: "internal/models/user.go", TemplatePath: "api/internal/models/user.go.tmpl"},
+		{Path: "internal/services/user_service.go", TemplatePath: "api/internal/services/user_service.go.tmpl"},
+		{Path: "internal/repositories/user_repository.go", TemplatePath: "api/internal/repositories/user_repository.go.tmpl"},
+		{Path: "migrations/001_create_users_table.sql", TemplatePath: "api/migrations/001_create_users_table.sql.tmpl"},
+		{Path: "api/openapi.yaml", TemplatePath: "api/api/openapi.yaml.tmpl"},
+		{Path: "Makefile", TemplatePath: "common/Makefile.tmpl"},
+		{Path: "Dockerfile", TemplatePath: "common/Dockerfile.tmpl"},
+		{Path: "docker-compose.yml", TemplatePath: "common/docker-compose.yml.tmpl"},
+		{Path: ".gitignore", TemplatePath: "common/.gitignore.tmpl"},
+		{Path: "README.md", TemplatePath: "api/README.md.tmpl"},
+		{Path: "config.yaml", TemplatePath: "api/config.yaml.tmpl"},
+		{Path: "internal/handlers/grpc.go", TemplatePath: "api/internal/handlers/grpc.go.tmpl", Condition: func(td TemplateData) bool { return td.WithGRPC }},
+	}
+}
+
+// getWorkerServiceFiles returns files for worker service template
+func getWorkerServiceFiles() []TemplateFile {
+	return []TemplateFile{
+		{Path: "go.mod", TemplatePath: "common/go.mod.tmpl"},
+		{Path: "main.go", TemplatePath: "common/main.go.tmpl"},
+		{Path: "cmd/worker.go", TemplatePath: "worker/cmd/worker.go.tmpl"},
+		{Path: "internal/config/config.go", TemplatePath: "worker/internal/config/config.go.tmpl"},
+		{Path: "internal/handlers/health.go", TemplatePath: "common/internal/handlers/health.go.tmpl"},
+		{Path: "internal/jobs/email_job.go", TemplatePath: "worker/internal/jobs/email_job.go.tmpl"},
+		{Path: "internal/jobs/image_processor.go", TemplatePath: "worker/internal/jobs/image_processor.go.tmpl"},
+		{Path: "internal/services/notification_service.go", TemplatePath: "worker/internal/services/notification_service.go.tmpl"},
+		{Path: "Makefile", TemplatePath: "common/Makefile.tmpl"},
+		{Path: "Dockerfile", TemplatePath: "common/Dockerfile.tmpl"},
+		{Path: "docker-compose.yml", TemplatePath: "worker/docker-compose.yml.tmpl"},
+		{Path: ".gitignore", TemplatePath: "common/.gitignore.tmpl"},
+		{Path: "README.md", TemplatePath: "worker/README.md.tmpl"},
+		{Path: "config.yaml", TemplatePath: "worker/config.yaml.tmpl"},
+	}
+}
+
+// getSchedulerServiceFiles returns files for scheduler service template
+func getSchedulerServiceFiles() []TemplateFile {
+	return []TemplateFile{
+		{Path: "go.mod", TemplatePath: "common/go.mod.tmpl"},
+		{Path: "main.go", TemplatePath: "common/main.go.tmpl"},
+		{Path: "cmd/scheduler.go", TemplatePath: "scheduler/cmd/scheduler.go.tmpl"},
+		{Path: "internal/config/config.go", TemplatePath: "scheduler/internal/config/config.go.tmpl"},
+		{Path: "internal/handlers/health.go", TemplatePath: "common/internal/handlers/health.go.tmpl"},
+		{Path: "internal/jobs/cleanup_job.go", TemplatePath: "scheduler/internal/jobs/cleanup_job.go.tmpl"},
+		{Path: "internal/jobs/report_job.go", TemplatePath: "scheduler/internal/jobs/report_job.go.tmpl"},
+		{Path: "internal/jobs/backup_job.go", TemplatePath: "scheduler/internal/jobs/backup_job.go.tmpl"},
+		{Path: "Makefile", TemplatePath: "common/Makefile.tmpl"},
+		{Path: "Dockerfile", TemplatePath: "common/Dockerfile.tmpl"},
+		{Path: "docker-compose.yml", TemplatePath: "scheduler/docker-compose.yml.tmpl"},
+		{Path: ".gitignore", TemplatePath: "common/.gitignore.tmpl"},
+		{Path: "README.md", TemplatePath: "scheduler/README.md.tmpl"},
+		{Path: "config.yaml", TemplatePath: "scheduler/config.yaml.tmpl"},
+	}
+}
+
+// getGatewayServiceFiles returns files for gateway service template
+func getGatewayServiceFiles() []TemplateFile {
+	return []TemplateFile{
+		{Path: "go.mod", TemplatePath: "common/go.mod.tmpl"},
+		{Path: "main.go", TemplatePath: "common/main.go.tmpl"},
+		{Path: "cmd/gateway.go", TemplatePath: "gateway/cmd/gateway.go.tmpl"},
+		{Path: "internal/config/config.go", TemplatePath: "gateway/internal/config/config.go.tmpl"},
+		{Path: "internal/handlers/handlers.go", TemplatePath: "gateway/internal/handlers/handlers.go.tmpl"},
+		{Path: "internal/handlers/health.go", TemplatePath: "common/internal/handlers/health.go.tmpl"},
+		{Path: "internal/handlers/proxy.go", TemplatePath: "gateway/internal/handlers/proxy.go.tmpl"},
+		{Path: "internal/middleware/auth.go", TemplatePath: "gateway/internal/middleware/auth.go.tmpl"},
+		{Path: "internal/middleware/rate_limit.go", TemplatePath: "gateway/internal/middleware/rate_limit.go.tmpl"},
+		{Path: "internal/services/routing_service.go", TemplatePath: "gateway/internal/services/routing_service.go.tmpl"},
+		{Path: "Makefile", TemplatePath: "common/Makefile.tmpl"},
+		{Path: "Dockerfile", TemplatePath: "common/Dockerfile.tmpl"},
+		{Path: "docker-compose.yml", TemplatePath: "gateway/docker-compose.yml.tmpl"},
+		{Path: ".gitignore", TemplatePath: "common/.gitignore.tmpl"},
+		{Path: "README.md", TemplatePath: "gateway/README.md.tmpl"},
+		{Path: "config.yaml", TemplatePath: "gateway/config.yaml.tmpl"},
+	}
+}
+
+// getEventServiceFiles returns files for event service template
+func getEventServiceFiles() []TemplateFile {
+	return []TemplateFile{
+		{Path: "go.mod", TemplatePath: "common/go.mod.tmpl"},
+		{Path: "main.go", TemplatePath: "common/main.go.tmpl"},
+		{Path: "cmd/event.go", TemplatePath: "event/cmd/event.go.tmpl"},
+		{Path: "internal/config/config.go", TemplatePath: "event/internal/config/config.go.tmpl"},
+		{Path: "internal/handlers/handlers.go", TemplatePath: "event/internal/handlers/handlers.go.tmpl"},
+		{Path: "internal/handlers/health.go", TemplatePath: "common/internal/handlers/health.go.tmpl"},
+		{Path: "internal/handlers/events.go", TemplatePath: "event/internal/handlers/events.go.tmpl"},
+		{Path: "internal/events/user_events.go", TemplatePath: "event/internal/events/user_events.go.tmpl"},
+		{Path: "internal/events/order_events.go", TemplatePath: "event/internal/events/order_events.go.tmpl"},
+		{Path: "internal/services/event_service.go", TemplatePath: "event/internal/services/event_service.go.tmpl"},
+		{Path: "migrations/001_create_outbox_table.sql", TemplatePath: "event/migrations/001_create_outbox_table.sql.tmpl"},
+		{Path: "api/asyncapi.yaml", TemplatePath: "event/api/asyncapi.yaml.tmpl"},
+		{Path: "Makefile", TemplatePath: "common/Makefile.tmpl"},
+		{Path: "Dockerfile", TemplatePath: "common/Dockerfile.tmpl"},
+		{Path: "docker-compose.yml", TemplatePath: "event/docker-compose.yml.tmpl"},
+		{Path: ".gitignore", TemplatePath: "common/.gitignore.tmpl"},
+		{Path: "README.md", TemplatePath: "event/README.md.tmpl"},
+		{Path: "config.yaml", TemplatePath: "event/config.yaml.tmpl"},
+	}
+}
+
+// TemplateEngine handles template processing
+type TemplateEngine struct {
+	templates map[string]*template.Template
+}
+
+// NewTemplateEngine creates a new template engine
+func NewTemplateEngine() (*TemplateEngine, error) {
+	engine := &TemplateEngine{
+		templates: make(map[string]*template.Template),
+	}
+
+	// Load all templates from embedded filesystem
+	if err := engine.loadTemplates(); err != nil {
+		return nil, fmt.Errorf("loading templates: %w", err)
+	}
+
+	return engine, nil
+}
+
+// loadTemplates loads all templates from the embedded filesystem
+func (te *TemplateEngine) loadTemplates() error {
+	return fs.WalkDir(templateFS, "templates", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() || !strings.HasSuffix(path, ".tmpl") {
+			return nil
+		}
+
+		content, err := templateFS.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading template %s: %w", path, err)
+		}
+
+		// Create template with helper functions
+		tmpl, err := template.New(path).Funcs(template.FuncMap{
+			"title":   strings.Title,
+			"lower":   strings.ToLower,
+			"upper":   strings.ToUpper,
+			"replace": strings.ReplaceAll,
+		}).Parse(string(content))
+		if err != nil {
+			return fmt.Errorf("parsing template %s: %w", path, err)
+		}
+
+		te.templates[path] = tmpl
+		return nil
+	})
+}
+
+// RenderTemplate renders a template with the given data
+func (te *TemplateEngine) RenderTemplate(templatePath string, data TemplateData) (string, error) {
+	tmpl, exists := te.templates[templatePath]
+	if !exists {
+		return "", fmt.Errorf("template not found: %s", templatePath)
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("executing template %s: %w", templatePath, err)
+	}
+
+	return buf.String(), nil
+}
+
+// GetAvailableTemplates returns a list of all available templates
+func (te *TemplateEngine) GetAvailableTemplates() []string {
+	var templates []string
+	for path := range te.templates {
+		templates = append(templates, path)
+	}
+	return templates
+}
+
+// Legacy templates for backward compatibility
 // goModTemplate generates the go.mod file
 const goModTemplate = `module {{.ModuleName}}
 

@@ -1,0 +1,103 @@
+package jobs
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/santif/microlib/jobs"
+)
+
+// EmailJobPayload represents the payload for email jobs
+type EmailJobPayload struct {
+	To      string            `json:"to"`
+	Subject string            `json:"subject"`
+	Body    string            `json:"body"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// EmailJob handles email sending jobs
+type EmailJob struct {
+	ID      string          `json:"id"`
+	Payload EmailJobPayload `json:"payload"`
+}
+
+// Execute implements the Job interface
+func (j *EmailJob) Execute(ctx context.Context) error {
+	j.handlers.logger.Info("Processing email job", 
+		"job_id", j.ID,
+		"to", j.Payload.To,
+		"subject", j.Payload.Subject,
+	)
+
+	// Simulate email sending
+	// In a real implementation, you would integrate with an email service
+	// like SendGrid, AWS SES, or SMTP
+	
+	// Add some processing time
+	select {
+	case <-time.After(100 * time.Millisecond):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Simulate occasional failures for demonstration
+	if j.Payload.To == "fail@example.com" {
+		return fmt.Errorf("simulated email sending failure")
+	}
+
+	j.handlers.logger.Info("Email sent successfully",
+		"job_id", j.ID,
+		"to", j.Payload.To,
+	)
+
+	return nil
+}
+
+// RetryPolicy implements the Job interface
+func (j *EmailJob) RetryPolicy() jobs.RetryPolicy {
+	return jobs.RetryPolicy{
+		MaxAttempts: 3,
+		InitialDelay: 1 * time.Second,
+		MaxDelay:     30 * time.Second,
+		Multiplier:   2.0,
+	}
+}
+
+// GetID implements the Job interface
+func (j *EmailJob) GetID() string {
+	return j.ID
+}
+
+// CreateEmailJob creates a new email job from raw job data
+func (h *JobHandlers) CreateEmailJob(jobData []byte) (jobs.Job, error) {
+	var emailJob EmailJob
+	if err := json.Unmarshal(jobData, &emailJob); err != nil {
+		return nil, fmt.Errorf("unmarshaling email job: %w", err)
+	}
+
+	emailJob.handlers = h
+	return &emailJob, nil
+}
+
+// EnqueueEmailJob enqueues a new email job
+func (h *JobHandlers) EnqueueEmailJob(ctx context.Context, payload EmailJobPayload) error {
+	jobID := fmt.Sprintf("email_%d", time.Now().UnixNano())
+	
+	emailJob := &EmailJob{
+		ID:      jobID,
+		Payload: payload,
+	}
+
+	jobData, err := json.Marshal(emailJob)
+	if err != nil {
+		return fmt.Errorf("marshaling email job: %w", err)
+	}
+
+	// This would typically be called from an API endpoint or message handler
+	// For now, it's a placeholder showing how jobs would be enqueued
+	h.logger.Info("Email job enqueued", "job_id", jobID, "to", payload.To)
+	
+	return nil
+}
