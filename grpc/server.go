@@ -165,11 +165,16 @@ func (s *server) Start(ctx context.Context) error {
 
 	// Start the server in a goroutine
 	go func() {
-		err := s.server.Serve(s.listener)
-		if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			s.shutdownErr = err
-			if s.deps.Logger != nil {
-				s.deps.Logger.Error("gRPC server error", err)
+		// Check if listener is still valid before serving
+		if s.listener != nil {
+			err := s.server.Serve(s.listener)
+			if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+				s.startedMu.Lock()
+				s.shutdownErr = err
+				s.startedMu.Unlock()
+				if s.deps.Logger != nil {
+					s.deps.Logger.Error("gRPC server error", err)
+				}
 			}
 		}
 	}()
