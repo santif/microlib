@@ -5,6 +5,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/santif/microlib/observability"
 )
 
 // Common errors for job queue operations
@@ -36,6 +38,15 @@ type JobQueue interface {
 	// List retrieves jobs with optional filters
 	List(ctx context.Context, filter JobFilter) ([]JobInfo, error)
 
+	// GetDeadLetteredJobs retrieves jobs that have been moved to the dead letter queue
+	GetDeadLetteredJobs(ctx context.Context, limit int) ([]JobInfo, error)
+
+	// RequeueDeadLetteredJob moves a job from the dead letter queue back to the main queue
+	RequeueDeadLetteredJob(ctx context.Context, jobID string) error
+
+	// PurgeDeadLetteredJob permanently removes a job from the dead letter queue
+	PurgeDeadLetteredJob(ctx context.Context, jobID string) error
+
 	// Close stops the job queue and releases resources
 	Close() error
 }
@@ -52,37 +63,13 @@ type JobFilter struct {
 	Offset    int
 }
 
-// RetryPolicy defines how jobs should be retried on failure
-type RetryPolicy struct {
-	// MaxRetries is the maximum number of retry attempts
-	MaxRetries int
-
-	// InitialInterval is the initial delay before the first retry
-	InitialInterval time.Duration
-
-	// MaxInterval is the maximum delay between retries
-	MaxInterval time.Duration
-
-	// Multiplier is the factor by which the delay increases with each retry
-	Multiplier float64
-
-	// RandomizationFactor adds jitter to retry intervals
-	RandomizationFactor float64
-}
-
-// DefaultRetryPolicy returns a sensible default retry policy
-func DefaultRetryPolicy() RetryPolicy {
-	return RetryPolicy{
-		MaxRetries:          3,
-		InitialInterval:     1 * time.Second,
-		MaxInterval:         1 * time.Minute,
-		Multiplier:          2.0,
-		RandomizationFactor: 0.2,
-	}
-}
+// RetryPolicy and DefaultRetryPolicy are defined in retry_policy.go
 
 // JobQueueConfig contains configuration for job queues
 type JobQueueConfig struct {
+	// Name is a unique identifier for this job queue
+	Name string `yaml:"name" json:"name"`
+
 	// Type specifies the job queue implementation ("memory", "redis", "postgres")
 	Type string `yaml:"type" json:"type" validate:"required,oneof=memory redis postgres"`
 
@@ -97,6 +84,9 @@ type JobQueueConfig struct {
 
 	// RetryPolicy defines the default retry behavior
 	RetryPolicy RetryPolicy `yaml:"retryPolicy" json:"retryPolicy"`
+
+	// DeadLetterEnabled determines if failed jobs should be moved to dead letter queue
+	DeadLetterEnabled bool `yaml:"deadLetterEnabled" json:"deadLetterEnabled"`
 
 	// Redis contains Redis-specific configuration
 	Redis struct {
@@ -123,11 +113,13 @@ type JobQueueConfig struct {
 // DefaultJobQueueConfig returns a default configuration for job queues
 func DefaultJobQueueConfig() JobQueueConfig {
 	config := JobQueueConfig{
-		Type:           "memory",
-		WorkerCount:    5,
-		PollInterval:   5 * time.Second,
-		DefaultTimeout: 5 * time.Minute,
-		RetryPolicy:    DefaultRetryPolicy(),
+		Name:              "default",
+		Type:              "memory",
+		WorkerCount:       5,
+		PollInterval:      5 * time.Second,
+		DefaultTimeout:    5 * time.Minute,
+		RetryPolicy:       DefaultRetryPolicy(),
+		DeadLetterEnabled: true,
 	}
 
 	// Set default Redis configuration
@@ -143,14 +135,17 @@ func DefaultJobQueueConfig() JobQueueConfig {
 // MemoryJobQueue implements JobQueue using in-memory storage
 // This is primarily for testing and development
 type MemoryJobQueue struct {
-	jobs       map[string]*queueJobEntry
-	queue      []*queueJobEntry
-	processing map[string]*queueJobEntry
-	mutex      sync.RWMutex
-	workers    int
-	wg         sync.WaitGroup
-	closed     bool
-	closeCh    chan struct{}
+	jobs         map[string]*queueJobEntry
+	queue        []*queueJobEntry
+	processing   map[string]*queueJobEntry
+	deadLettered map[string]*queueJobEntry // Dead letter queue for failed jobs
+	mutex        sync.RWMutex
+	workers      int
+	wg           sync.WaitGroup
+	closed       bool
+	closeCh      chan struct{}
+	metrics      *JobQueueMetrics
+	config       JobQueueConfig
 }
 
 type queueJobEntry struct {
@@ -165,17 +160,25 @@ type queueJobEntry struct {
 }
 
 // NewMemoryJobQueue creates a new in-memory job queue
-func NewMemoryJobQueue(config JobQueueConfig) *MemoryJobQueue {
+func NewMemoryJobQueue(config JobQueueConfig, metrics observability.Metrics) *MemoryJobQueue {
 	if config.WorkerCount <= 0 {
 		config.WorkerCount = 1
 	}
 
+	queueName := "memory"
+	if config.Name != "" {
+		queueName = config.Name
+	}
+
 	return &MemoryJobQueue{
-		jobs:       make(map[string]*queueJobEntry),
-		queue:      make([]*queueJobEntry, 0),
-		processing: make(map[string]*queueJobEntry),
-		workers:    config.WorkerCount,
-		closeCh:    make(chan struct{}),
+		jobs:         make(map[string]*queueJobEntry),
+		queue:        make([]*queueJobEntry, 0),
+		processing:   make(map[string]*queueJobEntry),
+		deadLettered: make(map[string]*queueJobEntry),
+		workers:      config.WorkerCount,
+		closeCh:      make(chan struct{}),
+		metrics:      newJobQueueMetrics(metrics, queueName),
+		config:       config,
 	}
 }
 
@@ -203,15 +206,25 @@ func (q *MemoryJobQueue) EnqueueWithDelay(ctx context.Context, job Job, delay ti
 	}
 
 	// Create job entry
+	now := time.Now()
 	entry := &queueJobEntry{
 		Job:        job,
 		Status:     JobStatusPending,
-		EnqueuedAt: time.Now(),
+		EnqueuedAt: now,
+	}
+
+	// If delay is specified, set the NextRetry time
+	if delay > 0 {
+		nextRun := now.Add(delay)
+		entry.NextRetry = &nextRun
 	}
 
 	// Add job to queue and map
 	q.jobs[job.ID()] = entry
 	q.queue = append(q.queue, entry)
+
+	// Record metric
+	q.metrics.enqueuedJobs.Inc()
 
 	return nil
 }
@@ -258,21 +271,36 @@ func (q *MemoryJobQueue) worker(ctx context.Context, handler JobHandler) {
 				continue
 			}
 
-			// Process the job
+			// Calculate queue time and record metric
+			now := time.Now()
+			queueTime := now.Sub(entry.EnqueuedAt).Seconds()
+			q.metrics.jobQueueTime.Observe(queueTime)
+
+			// Mark job as running
+			entry.Status = JobStatusRunning
+			entry.StartedAt = &now
+			q.metrics.startedJobs.Inc()
+
+			// Process the job with timeout
 			jobCtx := ctx
-			if timeout := entry.Job.Metadata().Timeout; timeout > 0 {
-				var cancel context.CancelFunc
+			var cancel context.CancelFunc
+
+			// Use job-specific timeout if available, otherwise use default
+			timeout := entry.Job.Metadata().Timeout
+			if timeout <= 0 {
+				timeout = q.config.DefaultTimeout
+			}
+
+			if timeout > 0 {
 				jobCtx, cancel = context.WithTimeout(ctx, timeout)
 				defer cancel()
 			}
 
-			// Mark job as running
-			now := time.Now()
-			entry.Status = JobStatusRunning
-			entry.StartedAt = &now
-
-			// Execute the job
+			// Execute the job and measure duration
+			startTime := time.Now()
 			err := handler(jobCtx, entry.Job)
+			duration := time.Since(startTime).Seconds()
+			q.metrics.jobDuration.Observe(duration)
 
 			// Update job status
 			q.mutex.Lock()
@@ -282,21 +310,38 @@ func (q *MemoryJobQueue) worker(ctx context.Context, handler JobHandler) {
 			if err != nil {
 				entry.Error = err
 				entry.Status = JobStatusFailed
+				q.metrics.failedJobs.Inc()
+
+				// Check if error was due to context timeout
+				if jobCtx.Err() == context.DeadlineExceeded {
+					// Handle timeout specially if needed
+					// For now, we'll treat it like any other error
+				}
 
 				// Handle retries if needed
 				retryPolicy := entry.Job.Metadata().RetryPolicy
-				if retryPolicy.MaxRetries > entry.RetryCount {
+				if ShouldRetry(retryPolicy, entry.RetryCount+1) {
 					entry.RetryCount++
-					backoff := calculateBackoff(retryPolicy, entry.RetryCount)
+					q.metrics.retriedJobs.Inc()
+
+					backoff := CalculateBackoff(retryPolicy, entry.RetryCount)
 					nextRetry := time.Now().Add(backoff)
 					entry.NextRetry = &nextRetry
 					entry.Status = JobStatusPending
 
 					// Re-queue the job
 					q.queue = append(q.queue, entry)
+				} else if q.config.DeadLetterEnabled {
+					// Move to dead letter queue if max retries exceeded
+					entry.Status = JobStatusDeadLettered
+					q.deadLettered[entry.Job.ID()] = entry
+					q.metrics.deadLetteredJobs.Inc()
+					q.metrics.jobRetryCount.Observe(float64(entry.RetryCount))
 				}
 			} else {
 				entry.Status = JobStatusCompleted
+				q.metrics.completedJobs.Inc()
+				q.metrics.jobRetryCount.Observe(float64(entry.RetryCount))
 			}
 
 			delete(q.processing, entry.Job.ID())
@@ -362,6 +407,9 @@ func (q *MemoryJobQueue) Cancel(ctx context.Context, jobID string) error {
 	now := time.Now()
 	entry.Status = JobStatusCancelled
 	entry.FinishedAt = &now
+
+	// Record metric
+	q.metrics.cancelledJobs.Inc()
 
 	return nil
 }
@@ -470,28 +518,78 @@ func (q *MemoryJobQueue) Close() error {
 	return nil
 }
 
-// calculateBackoff calculates the next retry interval using exponential backoff
-func calculateBackoff(policy RetryPolicy, retryCount int) time.Duration {
-	if retryCount <= 0 {
-		return 0
+// calculateBackoff is now defined in retry_policy.go as CalculateBackoff
+
+// JobStatusCancelled is defined in scheduler.go
+
+// GetDeadLetteredJobs retrieves jobs that have been moved to the dead letter queue
+func (q *MemoryJobQueue) GetDeadLetteredJobs(ctx context.Context, limit int) ([]JobInfo, error) {
+	q.mutex.RLock()
+	defer q.mutex.RUnlock()
+
+	result := make([]JobInfo, 0, len(q.deadLettered))
+	count := 0
+
+	for _, entry := range q.deadLettered {
+		if limit > 0 && count >= limit {
+			break
+		}
+
+		result = append(result, JobInfo{
+			ID:         entry.Job.ID(),
+			Name:       entry.Job.Name(),
+			Status:     entry.Status,
+			EnqueuedAt: entry.EnqueuedAt,
+			StartedAt:  entry.StartedAt,
+			FinishedAt: entry.FinishedAt,
+			Error:      entry.Error,
+			RetryCount: entry.RetryCount,
+			NextRetry:  entry.NextRetry,
+			Metadata:   entry.Job.Metadata(),
+		})
+		count++
 	}
 
-	// Calculate base interval with exponential backoff
-	interval := float64(policy.InitialInterval)
-	for i := 1; i < retryCount; i++ {
-		interval *= policy.Multiplier
-	}
-
-	// Apply max interval cap
-	if interval > float64(policy.MaxInterval) {
-		interval = float64(policy.MaxInterval)
-	}
-
-	return time.Duration(interval)
+	return result, nil
 }
 
-// Additional JobStatus constant for cancelled jobs
-const (
-	// JobStatusCancelled indicates the job was cancelled
-	JobStatusCancelled JobStatus = "cancelled"
-)
+// RequeueDeadLetteredJob moves a job from the dead letter queue back to the main queue
+func (q *MemoryJobQueue) RequeueDeadLetteredJob(ctx context.Context, jobID string) error {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	entry, exists := q.deadLettered[jobID]
+	if !exists {
+		return ErrJobNotFound
+	}
+
+	// Reset job status
+	entry.Status = JobStatusPending
+	entry.RetryCount = 0
+	entry.Error = nil
+	entry.NextRetry = nil
+	entry.StartedAt = nil
+	entry.FinishedAt = nil
+	entry.EnqueuedAt = time.Now()
+
+	// Move from dead letter queue back to main queue
+	delete(q.deadLettered, jobID)
+	q.queue = append(q.queue, entry)
+
+	return nil
+}
+
+// PurgeDeadLetteredJob permanently removes a job from the dead letter queue
+func (q *MemoryJobQueue) PurgeDeadLetteredJob(ctx context.Context, jobID string) error {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	if _, exists := q.deadLettered[jobID]; !exists {
+		return ErrJobNotFound
+	}
+
+	delete(q.deadLettered, jobID)
+	delete(q.jobs, jobID)
+
+	return nil
+}

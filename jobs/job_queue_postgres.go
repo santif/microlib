@@ -332,7 +332,7 @@ func (q *PostgresJobQueue) handleJobFailure(ctx context.Context, jobID string, e
 
 	if retryCount <= retryPolicy.MaxRetries {
 		// Calculate next retry time
-		backoff := calculateBackoff(retryPolicy, retryCount)
+		backoff := CalculateBackoff(retryPolicy, retryCount)
 		nextRetry := time.Now().Add(backoff)
 
 		// Update job for retry

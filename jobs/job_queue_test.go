@@ -7,11 +7,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/santif/microlib/observability"
 )
 
 // TestJobQueue_Enqueue tests the Enqueue method
 func TestJobQueue_Enqueue(t *testing.T) {
-	queue := NewMemoryJobQueue(DefaultJobQueueConfig())
+	queue := NewMemoryJobQueue(DefaultJobQueueConfig(), observability.NewMetrics())
 	defer queue.Close()
 
 	// Create a test job
@@ -44,7 +46,7 @@ func TestJobQueue_Enqueue(t *testing.T) {
 
 // TestJobQueue_Process tests the Process method
 func TestJobQueue_Process(t *testing.T) {
-	queue := NewMemoryJobQueue(DefaultJobQueueConfig())
+	queue := NewMemoryJobQueue(DefaultJobQueueConfig(), observability.NewMetrics())
 	defer queue.Close()
 
 	// Create a channel to signal job completion
@@ -91,7 +93,7 @@ func TestJobQueue_Process(t *testing.T) {
 
 // TestJobQueue_Cancel tests the Cancel method
 func TestJobQueue_Cancel(t *testing.T) {
-	queue := NewMemoryJobQueue(DefaultJobQueueConfig())
+	queue := NewMemoryJobQueue(DefaultJobQueueConfig(), observability.NewMetrics())
 	defer queue.Close()
 
 	// Create a test job
@@ -131,7 +133,7 @@ func TestJobQueue_Cancel(t *testing.T) {
 
 // TestJobQueue_Get tests the Get method
 func TestJobQueue_Get(t *testing.T) {
-	queue := NewMemoryJobQueue(DefaultJobQueueConfig())
+	queue := NewMemoryJobQueue(DefaultJobQueueConfig(), observability.NewMetrics())
 	defer queue.Close()
 
 	// Create a test job
@@ -172,7 +174,7 @@ func TestJobQueue_Get(t *testing.T) {
 
 // TestJobQueue_List tests the List method
 func TestJobQueue_List(t *testing.T) {
-	queue := NewMemoryJobQueue(DefaultJobQueueConfig())
+	queue := NewMemoryJobQueue(DefaultJobQueueConfig(), observability.NewMetrics())
 	defer queue.Close()
 
 	// Create and enqueue multiple jobs
@@ -235,7 +237,7 @@ func TestJobQueue_List(t *testing.T) {
 func TestJobQueue_Retry(t *testing.T) {
 	config := DefaultJobQueueConfig()
 	config.WorkerCount = 1
-	queue := NewMemoryJobQueue(config)
+	queue := NewMemoryJobQueue(config, observability.NewMetrics())
 	defer queue.Close()
 
 	// Create a mutex to protect the retry count
@@ -316,7 +318,7 @@ func TestJobQueue_Retry(t *testing.T) {
 
 // TestJobQueue_Close tests the Close method
 func TestJobQueue_Close(t *testing.T) {
-	queue := NewMemoryJobQueue(DefaultJobQueueConfig())
+	queue := NewMemoryJobQueue(DefaultJobQueueConfig(), observability.NewMetrics())
 
 	// Close the queue
 	err := queue.Close()

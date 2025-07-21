@@ -119,6 +119,12 @@ const (
 
 	// JobStatusFailed indicates the job failed to complete
 	JobStatusFailed JobStatus = "failed"
+
+	// JobStatusDeadLettered indicates the job failed and exceeded retry attempts
+	JobStatusDeadLettered JobStatus = "dead_lettered"
+
+	// JobStatusCancelled indicates the job was cancelled
+	JobStatusCancelled JobStatus = "cancelled"
 )
 
 // JobExecution represents a single execution of a job

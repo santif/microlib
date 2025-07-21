@@ -287,7 +287,7 @@ func (q *RedisJobQueue) handleJobFailure(ctx context.Context, jobID string, jobE
 
 	if jobEntry.RetryCount <= retryPolicy.MaxRetries {
 		// Calculate next retry time
-		backoff := calculateBackoff(retryPolicy, jobEntry.RetryCount)
+		backoff := CalculateBackoff(retryPolicy, jobEntry.RetryCount)
 		nextRetry := time.Now().Add(backoff)
 		jobEntry.NextRetry = &nextRetry
 
