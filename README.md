@@ -245,6 +245,17 @@ make lint
 make build
 ```
 
+## 📚 Documentation
+
+Comprehensive documentation is available in the `docs/` directory:
+
+* **[Getting Started Guide](docs/getting-started.md)**: Step-by-step tutorial for building your first service
+* **[API Reference](docs/api-reference.md)**: Complete documentation of all public interfaces
+* **[Architecture Decision Records](docs/architecture/)**: Design decisions and rationale
+* **[Migration Guide](docs/migration-guide.md)**: Migrate existing services to MicroLib
+* **[Best Practices](docs/best-practices.md)**: Recommendations for building robust services
+* **[Troubleshooting](docs/troubleshooting.md)**: Common issues and solutions
+
 ## 📚 Examples
 
 Check the `examples/` directory for complete service implementations:
@@ -268,7 +279,7 @@ This project is licensed under the MIT License – see the [LICENSE](LICENSE) fi
 
 ## 🆘 Support
 
-* 📖 [Documentation](https://microlib.dev/docs)
+* 📖 [Documentation](docs/)
 * 💬 [Discord Community](https://discord.gg/microlib)
 * 🐛 [Issue Tracker](https://github.com/santif/microlib/issues)
 * 📧 [Email Support](mailto:support@microlib.dev)
