@@ -357,7 +357,7 @@ func AuthUnaryServerInterceptor(authenticator security.Authenticator, bypassPath
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		// Check if the path should bypass authentication
 		for _, path := range bypassPaths {
-			if info.FullMethod == path {
+			if info.FullMethod == path || (path != "/" && len(info.FullMethod) >= len(path) && info.FullMethod[:len(path)] == path) {
 				// Skip authentication for this path
 				return handler(ctx, req)
 			}
@@ -391,6 +391,11 @@ func AuthUnaryServerInterceptor(authenticator security.Authenticator, bypassPath
 		// Add claims to context
 		ctx = context.WithValue(ctx, security.ClaimsContextKey, claims)
 
+		// Add custom claims to context if specified
+		for k, v := range claims.Custom {
+			ctx = context.WithValue(ctx, security.ClaimContextKey(k), v)
+		}
+
 		// Process the request with the authenticated context
 		return handler(ctx, req)
 	}
@@ -420,7 +425,7 @@ func AuthStreamServerInterceptor(authenticator security.Authenticator, bypassPat
 
 		// Check if the path should bypass authentication
 		for _, path := range bypassPaths {
-			if info.FullMethod == path {
+			if info.FullMethod == path || (path != "/" && len(info.FullMethod) >= len(path) && info.FullMethod[:len(path)] == path) {
 				// Skip authentication for this path
 				return handler(srv, ss)
 			}
@@ -454,6 +459,11 @@ func AuthStreamServerInterceptor(authenticator security.Authenticator, bypassPat
 		// Add claims to context
 		ctx = context.WithValue(ctx, security.ClaimsContextKey, claims)
 
+		// Add custom claims to context if specified
+		for k, v := range claims.Custom {
+			ctx = context.WithValue(ctx, security.ClaimContextKey(k), v)
+		}
+
 		// Create a wrapped server stream with the authenticated context
 		wrappedStream := &wrappedServerStream{
 			ServerStream: ss,
@@ -462,6 +472,59 @@ func AuthStreamServerInterceptor(authenticator security.Authenticator, bypassPat
 
 		// Process the stream with the authenticated context
 		return handler(srv, wrappedStream)
+	}
+}
+
+// RequireScopeUnaryInterceptor creates a gRPC server interceptor that requires a specific scope
+func RequireScopeUnaryInterceptor(scope string) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		// Get claims from context
+		claims, ok := security.GetClaimsFromContext(ctx)
+		if !ok {
+			return nil, status.Errorf(grpccodes.Unauthenticated, "No authentication claims found")
+		}
+
+		// Check if the user has the required scope
+		scopes, ok := claims.Custom["scope"].(string)
+		if !ok {
+			return nil, status.Errorf(grpccodes.PermissionDenied, "No scopes found in token")
+		}
+
+		// Check if the scope is in the list
+		scopeList := security.ParseScopeString(scopes)
+		if !scopeList[scope] {
+			return nil, status.Errorf(grpccodes.PermissionDenied, "Missing required scope: %s", scope)
+		}
+
+		// Call the next handler
+		return handler(ctx, req)
+	}
+}
+
+// RequireScopeStreamInterceptor creates a gRPC server interceptor that requires a specific scope
+func RequireScopeStreamInterceptor(scope string) grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		// Get claims from context
+		ctx := ss.Context()
+		claims, ok := security.GetClaimsFromContext(ctx)
+		if !ok {
+			return status.Errorf(grpccodes.Unauthenticated, "No authentication claims found")
+		}
+
+		// Check if the user has the required scope
+		scopes, ok := claims.Custom["scope"].(string)
+		if !ok {
+			return status.Errorf(grpccodes.PermissionDenied, "No scopes found in token")
+		}
+
+		// Check if the scope is in the list
+		scopeList := security.ParseScopeString(scopes)
+		if !scopeList[scope] {
+			return status.Errorf(grpccodes.PermissionDenied, "Missing required scope: %s", scope)
+		}
+
+		// Call the next handler
+		return handler(srv, ss)
 	}
 }
 

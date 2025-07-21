@@ -122,7 +122,9 @@ func TestExtractToken(t *testing.T) {
 			AuthScheme:  "Bearer",
 		},
 		logger: logger,
-		keys:   make(map[string]interface{}),
+		jwksClient: &JWKSClient{
+			keys: make(map[string]interface{}),
+		},
 	}
 
 	// Valid header
@@ -163,7 +165,9 @@ func TestExtractToken(t *testing.T) {
 			TokenLookup: "query:token",
 		},
 		logger: logger,
-		keys:   make(map[string]interface{}),
+		jwksClient: &JWKSClient{
+			keys: make(map[string]interface{}),
+		},
 	}
 
 	// Valid query
@@ -192,7 +196,9 @@ func TestExtractToken(t *testing.T) {
 			TokenLookup: "cookie:token",
 		},
 		logger: logger,
-		keys:   make(map[string]interface{}),
+		jwksClient: &JWKSClient{
+			keys: make(map[string]interface{}),
+		},
 	}
 
 	// Valid cookie
@@ -222,7 +228,9 @@ func TestExtractToken(t *testing.T) {
 			TokenLookup: "invalid:token",
 		},
 		logger: logger,
-		keys:   make(map[string]interface{}),
+		jwksClient: &JWKSClient{
+			keys: make(map[string]interface{}),
+		},
 	}
 	req = httptest.NewRequest("GET", "/test", nil)
 	token, err = auth.extractToken(req)

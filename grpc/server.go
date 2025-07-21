@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/santif/microlib/observability"
-	"github.com/santif/microlib/security"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
@@ -147,7 +146,7 @@ func (s *server) Start(ctx context.Context) error {
 	reflection.Register(s.server)
 
 	// Create the server address
-	addr := fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
+	addr := fmt.Sprintf("%s:%d", s.config.Address, s.config.Port)
 
 	// Create the listener
 	var err error
@@ -160,7 +159,7 @@ func (s *server) Start(ctx context.Context) error {
 	if s.deps.Logger != nil {
 		s.deps.Logger.Info("Starting gRPC server",
 			observability.NewField("address", addr),
-			observability.NewField("tls_enabled", s.config.EnableTLS),
+			observability.NewField("tls_enabled", s.config.TLS != nil && s.config.TLS.Enabled),
 		)
 	}
 
@@ -185,23 +184,23 @@ func (s *server) Start(ctx context.Context) error {
 func (s *server) createServerOptions() []grpc.ServerOption {
 	opts := []grpc.ServerOption{
 		grpc.KeepaliveParams(keepalive.ServerParameters{
-			MaxConnectionIdle:     s.config.MaxConnectionIdle,
+			MaxConnectionIdle:     s.config.KeepAlive.MaxConnectionIdle,
 			MaxConnectionAge:      s.config.MaxConnectionAge,
 			MaxConnectionAgeGrace: s.config.MaxConnectionAgeGrace,
-			Time:                  s.config.KeepAlive,
-			Timeout:               s.config.KeepAliveTimeout,
+			Time:                  s.config.KeepAlive.Time,
+			Timeout:               s.config.KeepAlive.Timeout,
 		}),
 		grpc.MaxConcurrentStreams(s.config.MaxConcurrentStreams),
 	}
 
 	// Add TLS if enabled
-	if s.config.EnableTLS {
-		cert, err := tls.LoadX509KeyPair(s.config.TLSCertFile, s.config.TLSKeyFile)
+	if s.config.TLS != nil && s.config.TLS.Enabled {
+		cert, err := tls.LoadX509KeyPair(s.config.TLS.CertFile, s.config.TLS.KeyFile)
 		if err != nil {
 			if s.deps.Logger != nil {
 				s.deps.Logger.Error("Failed to load TLS certificates", err,
-					observability.NewField("cert_file", s.config.TLSCertFile),
-					observability.NewField("key_file", s.config.TLSKeyFile),
+					observability.NewField("cert_file", s.config.TLS.CertFile),
+					observability.NewField("key_file", s.config.TLS.KeyFile),
 				)
 			}
 		} else {
@@ -221,23 +220,23 @@ func (s *server) createServerOptions() []grpc.ServerOption {
 
 	// Add authentication interceptors if auth is enabled
 	if s.config.Auth != nil && s.config.Auth.Enabled {
-		// Convert our AuthConfig to security.AuthConfig
-		securityAuthConfig := security.AuthConfig{
-			JWKSEndpoint:    s.config.Auth.JWKSEndpoint,
-			Issuer:          s.config.Auth.Issuer,
-			Audience:        []string{s.config.Auth.Audience}, // Convert string to []string
-			RefreshInterval: time.Hour,                        // Default refresh interval
-			TokenLookup:     "header:Authorization",           // Default token lookup
-			AuthScheme:      "Bearer",                         // Default auth scheme
-		}
-
-		// Get authenticator from security package
-		authenticator, err := security.NewJWTAuthenticator(securityAuthConfig, s.deps.Logger)
+		// Create authenticator from the server configuration
+		authenticator, err := NewAuthenticator(*s.config.Auth)
 		if err == nil {
-			unaryInterceptors = append(unaryInterceptors, AuthUnaryServerInterceptor(authenticator, s.config.HealthPaths))
-			streamInterceptors = append(streamInterceptors, AuthStreamServerInterceptor(authenticator, s.config.HealthPaths))
+			// Add authentication interceptors
+			unaryInterceptors = append(unaryInterceptors, AuthUnaryServerInterceptor(authenticator, s.config.Auth.BypassPaths))
+			streamInterceptors = append(streamInterceptors, AuthStreamServerInterceptor(authenticator, s.config.Auth.BypassPaths))
+
+			// Add scope requirement interceptors if required scopes are specified
+			if len(s.config.Auth.RequiredScopes) > 0 {
+				for _, scope := range s.config.Auth.RequiredScopes {
+					unaryInterceptors = append(unaryInterceptors, RequireScopeUnaryInterceptor(scope))
+					streamInterceptors = append(streamInterceptors, RequireScopeStreamInterceptor(scope))
+				}
+			}
 		} else if s.deps.Logger != nil {
-			s.deps.Logger.Error("Failed to create JWT authenticator", err)
+			s.deps.Logger.Error("Failed to create JWT authenticator", err,
+				observability.NewField("jwks_endpoint", s.config.Auth.JWKSEndpoint))
 		}
 	}
 
@@ -303,12 +302,11 @@ func (s *server) Shutdown(ctx context.Context) error {
 	if s.deps.Logger != nil {
 		s.deps.Logger.Info("Shutting down gRPC server",
 			observability.NewField("address", serverAddr),
-			observability.NewField("timeout", s.config.ShutdownTimeout.String()),
 		)
 	}
 
 	// Create a context with timeout for shutdown
-	shutdownCtx, cancel := context.WithTimeout(ctx, s.config.ShutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // Default to 30 seconds
 	defer cancel()
 
 	// Create a channel to signal when the server has stopped
@@ -333,8 +331,7 @@ func (s *server) Shutdown(ctx context.Context) error {
 		// Context canceled, force stop the server
 		forceShutdown = true
 		if s.deps.Logger != nil {
-			s.deps.Logger.Warn("gRPC server graceful shutdown timed out, forcing stop",
-				observability.NewField("timeout", s.config.ShutdownTimeout.String()))
+			s.deps.Logger.Warn("gRPC server graceful shutdown timed out, forcing stop")
 		}
 		s.server.Stop()
 	}
@@ -360,7 +357,7 @@ func (s *server) Shutdown(ctx context.Context) error {
 
 	// Return timeout error if we had to force shutdown
 	if forceShutdown {
-		return fmt.Errorf("server shutdown timed out after %s", s.config.ShutdownTimeout.String())
+		return fmt.Errorf("server shutdown timed out")
 	}
 
 	return nil
@@ -375,7 +372,7 @@ func (s *server) Address() string {
 	defer s.startedMu.RUnlock()
 
 	if !s.started || s.listener == nil {
-		return fmt.Sprintf("%s:%d", s.config.Host, s.config.Port)
+		return fmt.Sprintf("%s:%d", s.config.Address, s.config.Port)
 	}
 
 	return s.listener.Addr().String()

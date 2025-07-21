@@ -4,14 +4,11 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -162,12 +159,9 @@ type JWK struct {
 
 // JWTAuthenticator implements the Authenticator interface for JWT tokens
 type JWTAuthenticator struct {
-	config      AuthConfig
-	logger      observability.Logger
-	keys        map[string]interface{}
-	mu          sync.RWMutex
-	httpClient  *http.Client
-	lastRefresh time.Time
+	config     AuthConfig
+	logger     observability.Logger
+	jwksClient *JWKSClient
 }
 
 // NewJWTAuthenticator creates a new JWT authenticator
@@ -176,136 +170,26 @@ func NewJWTAuthenticator(config AuthConfig, logger observability.Logger) (*JWTAu
 		return nil, errors.New("JWKS endpoint is required")
 	}
 
-	auth := &JWTAuthenticator{
-		config: config,
-		logger: logger,
-		keys:   make(map[string]interface{}),
-		httpClient: &http.Client{
+	// Create JWKS client
+	jwksClient, err := NewJWKSClient(
+		config.JWKSEndpoint,
+		logger,
+		WithRefreshInterval(config.RefreshInterval),
+		WithHTTPClient(&http.Client{
 			Timeout: 10 * time.Second,
-		},
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JWKS client: %w", err)
 	}
 
-	// Fetch keys initially
-	if err := auth.refreshKeys(); err != nil {
-		return nil, fmt.Errorf("failed to fetch initial JWKS: %w", err)
-	}
-
-	// Start background refresh if interval is set
-	if config.RefreshInterval > 0 {
-		go auth.startKeyRefresher()
+	auth := &JWTAuthenticator{
+		config:     config,
+		logger:     logger,
+		jwksClient: jwksClient,
 	}
 
 	return auth, nil
-}
-
-// startKeyRefresher starts a background goroutine to refresh the JWKS keys
-func (a *JWTAuthenticator) startKeyRefresher() {
-	ticker := time.NewTicker(a.config.RefreshInterval)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		if err := a.refreshKeys(); err != nil {
-			a.logger.Error("Failed to refresh JWKS keys", err)
-		}
-	}
-}
-
-// refreshKeys fetches the latest keys from the JWKS endpoint
-func (a *JWTAuthenticator) refreshKeys() error {
-	a.logger.Info("Refreshing JWKS keys",
-		observability.NewField("endpoint", a.config.JWKSEndpoint))
-
-	// Make HTTP request to JWKS endpoint
-	resp, err := a.httpClient.Get(a.config.JWKSEndpoint)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrJWKSFetchFailed, err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%w: unexpected status code %d", ErrJWKSFetchFailed, resp.StatusCode)
-	}
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("%w: failed to read response body: %v", ErrJWKSFetchFailed, err)
-	}
-
-	// Parse JWKS
-	var jwks JWKS
-	if err := json.Unmarshal(body, &jwks); err != nil {
-		return fmt.Errorf("%w: failed to parse JWKS: %v", ErrJWKSFetchFailed, err)
-	}
-
-	// Process keys
-	newKeys := make(map[string]interface{})
-	for _, key := range jwks.Keys {
-		if key.Use == "sig" {
-			var publicKey interface{}
-			var err error
-
-			switch key.Kty {
-			case "RSA":
-				if len(key.X5c) > 0 {
-					// Convert X5c (X.509 certificate chain) to PEM format
-					certData := "-----BEGIN CERTIFICATE-----\n" + key.X5c[0] + "\n-----END CERTIFICATE-----"
-					publicKey, err = jwt.ParseRSAPublicKeyFromPEM([]byte(certData))
-				} else if key.N != "" && key.E != "" {
-					// Parse from modulus and exponent
-					publicKey, err = parseRSAPublicKeyFromJWK(key.N, key.E)
-				} else {
-					a.logger.Error("RSA key missing required parameters", nil,
-						observability.NewField("kid", key.Kid))
-					continue
-				}
-			case "EC":
-				// Support for EC keys could be added here
-				a.logger.Error("EC keys not yet supported", nil,
-					observability.NewField("kid", key.Kid))
-				continue
-			default:
-				a.logger.Error("Unsupported key type", nil,
-					observability.NewField("kid", key.Kid),
-					observability.NewField("kty", key.Kty))
-				continue
-			}
-
-			if err != nil {
-				a.logger.Error("Failed to parse public key", err,
-					observability.NewField("kid", key.Kid),
-					observability.NewField("kty", key.Kty))
-				continue
-			}
-
-			newKeys[key.Kid] = publicKey
-		}
-	}
-
-	// Update keys
-	a.mu.Lock()
-	a.keys = newKeys
-	a.lastRefresh = time.Now()
-	a.mu.Unlock()
-
-	a.logger.Info("JWKS keys refreshed successfully",
-		observability.NewField("key_count", len(newKeys)))
-
-	return nil
-}
-
-// getKey returns the key for the given key ID
-func (a *JWTAuthenticator) getKey(kid string) (interface{}, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	key, ok := a.keys[kid]
-	if !ok {
-		return nil, ErrKeyNotFound
-	}
-
-	return key, nil
 }
 
 // ValidateToken validates a JWT token and returns the claims
@@ -324,14 +208,14 @@ func (a *JWTAuthenticator) ValidateToken(ctx context.Context, tokenString string
 		}
 
 		// Get the key for this key ID
-		return a.getKey(kid)
+		return a.jwksClient.GetKey(kid)
 	})
 
 	// Handle parsing errors
 	if err != nil {
 		if errors.Is(err, ErrKeyNotFound) {
 			// Try to refresh keys and retry
-			if refreshErr := a.refreshKeys(); refreshErr != nil {
+			if refreshErr := a.jwksClient.ForceRefresh(ctx); refreshErr != nil {
 				return nil, fmt.Errorf("failed to refresh keys: %w", refreshErr)
 			}
 
@@ -349,7 +233,7 @@ func (a *JWTAuthenticator) ValidateToken(ctx context.Context, tokenString string
 				}
 
 				// Get the key for this key ID
-				return a.getKey(kid)
+				return a.jwksClient.GetKey(kid)
 			})
 
 			if err != nil {
